@@ -1,10 +1,11 @@
-"""Synthetic note text generator backed by Anthropic API.
+"""Synthetic note text generator backed by the Databricks Foundation Model API.
 
-Cost guardrail: caps to ~1.5K calls for the full corpus (~$5 at Sonnet pricing).
+Uses the workspace's databricks-claude-sonnet-4-5 endpoint (configurable via
+FSISIM_LLM_ENDPOINT). No personal Anthropic key required: auth flows through
+the user's Databricks profile.
 """
 from dataclasses import dataclass
 from typing import Optional
-import os
 
 NOTE_TYPE_NAMES = {
     "INI": "Initial Report",
@@ -48,14 +49,22 @@ def _note_type_instruction(note_type: str) -> str:
 
 
 class NoteAuthor:
-    def __init__(self, client=None, model: str = "claude-sonnet-4-5"):
+    """Calls a Databricks serving endpoint to author one note per call.
+
+    Default endpoint is `databricks-claude-sonnet-4-5`. Inject `client`
+    (a databricks.sdk.WorkspaceClient or a duck-typed mock) for testing.
+    """
+
+    def __init__(self, client=None, endpoint: str = "databricks-claude-sonnet-4-5"):
         if client is None:
-            from anthropic import Anthropic
-            client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+            from databricks.sdk import WorkspaceClient
+            client = WorkspaceClient()
         self.client = client
-        self.model = model
+        self.endpoint = endpoint
 
     def author(self, ctx: IssueContext) -> str:
+        from databricks.sdk.service.serving import ChatMessage, ChatMessageRole
+
         user_msg = (
             f"Issue type: {ctx.issue_type}\n"
             f"Category: {ctx.category}\n"
@@ -65,11 +74,13 @@ class NoteAuthor:
             f"Note type code: {ctx.note_type} ({NOTE_TYPE_NAMES.get(ctx.note_type, ctx.note_type)})\n\n"
             f"{_note_type_instruction(ctx.note_type)}"
         )
-        resp = self.client.messages.create(
-            model=self.model,
+        resp = self.client.serving_endpoints.query(
+            name=self.endpoint,
+            messages=[
+                ChatMessage(role=ChatMessageRole.SYSTEM, content=SYSTEM_PROMPT),
+                ChatMessage(role=ChatMessageRole.USER, content=user_msg),
+            ],
             max_tokens=200,
-            system=SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": user_msg}],
         )
-        text = resp.content[0].text.strip()
+        text = resp.choices[0].message.content.strip()
         return text.strip('"').strip()
