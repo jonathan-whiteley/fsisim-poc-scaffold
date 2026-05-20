@@ -1,0 +1,74 @@
+{
+  "samples": [
+    {
+      "id": "note-001", "issue_id": 1001, "issue_type": "Mechanical",
+      "issue_create_date": "2025-03-15T08:30:00Z", "category": "Hardware",
+      "mmi": true, "systems": "Hydraulics", "root_cause": "Worn actuator seal",
+      "due_date_comment": "Parts on order ETA 3/20", "lost_time": 2.5,
+      "lost_time_type": "Training", "sim_id": 501, "sim_name": "G001-SIM-01",
+      "sim_type": 1, "sim_type_name": "Full Flight Simulator",
+      "loc_name": "Washington", "sim_location_id": 10,
+      "note": "Hydraulic pressure drop observed during takeoff roll. Actuator replaced and system tested OK.",
+      "note_type": "RES", "note_type_description": "Resolution",
+      "note_name_creator": "John Smith", "note_create_date": "2025-03-16T14:00:00Z",
+      "issue_category": "Maintenance", "assign_type": 1, "device_id": 3001,
+      "device_status": "Active", "sim_lead_location_id": 10, "lead_loc_name": "Washington"
+    },
+    {
+      "id": "note-002", "issue_id": 1001, "issue_type": "Mechanical",
+      "issue_create_date": "2025-03-15T08:30:00Z", "category": "Hardware",
+      "mmi": true, "systems": "Hydraulics", "root_cause": "Worn actuator seal",
+      "due_date_comment": "Parts on order ETA 3/20", "lost_time": 2.5,
+      "lost_time_type": "Training", "sim_id": 501, "sim_name": "G001-SIM-01",
+      "sim_type": 1, "sim_type_name": "Full Flight Simulator",
+      "loc_name": "Washington", "sim_location_id": 10,
+      "note": "Initial report: left main gear hydraulic warning during session. Sim taken offline.",
+      "note_type": "INI", "note_type_description": "Initial Report",
+      "note_name_creator": "Jane Doe", "note_create_date": "2025-03-15T09:00:00Z",
+      "issue_category": "Maintenance", "assign_type": 1, "device_id": 3001,
+      "device_status": "Active", "sim_lead_location_id": 10, "lead_loc_name": "Washington"
+    },
+    {
+      "id": "note-003", "issue_id": 1002, "issue_type": "Software",
+      "issue_create_date": "2025-04-02T11:15:00Z", "category": "Software",
+      "mmi": false, "systems": "Visual System", "root_cause": "Database corruption",
+      "due_date_comment": null, "lost_time": 1.0, "lost_time_type": "Scheduled",
+      "sim_id": 502, "sim_name": "G001-SIM-02", "sim_type": 1,
+      "sim_type_name": "Full Flight Simulator", "loc_name": "St. George",
+      "sim_location_id": 20,
+      "note": "Terrain rendering artifacts at KJFK approach. Visual database reload resolved the issue.",
+      "note_type": "SOL", "note_type_description": "Solution",
+      "note_name_creator": "Mike Johnson", "note_create_date": "2025-04-03T10:30:00Z",
+      "issue_category": "Operations", "assign_type": 2, "device_id": 3002,
+      "device_status": "Active", "sim_lead_location_id": 20, "lead_loc_name": "St. George"
+    },
+    {
+      "id": "note-004", "issue_id": 1003, "issue_type": "Electrical",
+      "issue_create_date": "2025-04-10T06:45:00Z", "category": "Hardware",
+      "mmi": true, "systems": "Motion System", "root_cause": "Loose connector",
+      "due_date_comment": "Expedited repair", "lost_time": 4.0,
+      "lost_time_type": "Training", "sim_id": 503, "sim_name": "G001-SIM-03",
+      "sim_type": 2, "sim_type_name": "Fixed Training Device",
+      "loc_name": "Teterboro", "sim_location_id": 30,
+      "note": "Motion platform fault code 47B. Connector on motor driver board reseated. Full motion test passed.",
+      "note_type": "RES", "note_type_description": "Resolution",
+      "note_name_creator": "Sarah Williams", "note_create_date": "2025-04-11T16:00:00Z",
+      "issue_category": "Maintenance", "assign_type": 1, "device_id": 3003,
+      "device_status": "Inactive", "sim_lead_location_id": 30, "lead_loc_name": "Teterboro"
+    },
+    {
+      "id": "note-005", "issue_id": 1004, "issue_type": "Software",
+      "issue_create_date": "2025-05-01T14:00:00Z", "category": "Software",
+      "mmi": false, "systems": "Flight Model", "root_cause": "Configuration drift",
+      "due_date_comment": null, "lost_time": 0.0, "lost_time_type": "Non-Impact",
+      "sim_id": 501, "sim_name": "G001-SIM-01", "sim_type": 1,
+      "sim_type_name": "Full Flight Simulator", "loc_name": "Washington",
+      "sim_location_id": 10,
+      "note": "FMS VNAV path deviation noted during RNAV approach. Aero model parameter file updated to latest revision.",
+      "note_type": "SOL", "note_type_description": "Solution",
+      "note_name_creator": "Tom Anderson", "note_create_date": "2025-05-02T09:15:00Z",
+      "issue_category": "Engineering", "assign_type": 3, "device_id": 3001,
+      "device_status": "Active", "sim_lead_location_id": 10, "lead_loc_name": "Washington"
+    }
+  ]
+}
