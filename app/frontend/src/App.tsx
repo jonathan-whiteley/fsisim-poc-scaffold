@@ -1,6 +1,7 @@
 import { Box, AppBar, Toolbar, Typography, Avatar } from "@mui/material";
 import { FS_NAVY, FS_GOLD } from "./theme";
 import LeftRail from "./components/LeftRail";
+import ChatThread from "./components/ChatThread";
 import { useState } from "react";
 
 const EXAMPLES = [
@@ -38,11 +39,7 @@ export default function App() {
       <Box sx={{ display: "flex", flex: 1, overflow: "hidden" }}>
         <LeftRail examples={EXAMPLES} onPick={setPendingExample} />
         <Box sx={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
-          <Box sx={{ flex: 1, p: 3, display: "flex", alignItems: "center", justifyContent: "center", color: "#888" }}>
-            {pendingExample
-              ? <span>Picked: "{pendingExample}" (Task 19 wires this to the chat)</span>
-              : <span>Chat thread placeholder. Task 19 fills this in.</span>}
-          </Box>
+          <ChatThread pendingExample={pendingExample} onConsumeExample={() => setPendingExample(null)} />
           <Box sx={{ p: 1, textAlign: "center", color: "#888", fontSize: 11, bgcolor: "#F5F5F5" }}>
             Scaffold build / mock data / not for customer use
           </Box>
