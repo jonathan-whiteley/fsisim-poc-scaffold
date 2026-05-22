@@ -1,5 +1,7 @@
 import { Chip } from "@mui/material";
-import { FS_NAVY, FS_GOLD } from "../theme";
+import DescriptionOutlinedIcon from "@mui/icons-material/DescriptionOutlined";
+import BugReportOutlinedIcon from "@mui/icons-material/BugReportOutlined";
+import { FS_NAVY, FS_SKY, FS_SKY_LIGHT, FS_BORDER, FS_MUTED } from "../theme";
 
 export type Citation =
   | { kind: "issue"; issueId: number; noteType: string; preview: string }
@@ -17,19 +19,38 @@ function pageLabel(first: number, last: number): string {
 }
 
 export default function CitationPill({ c, onClick }: Props) {
-  const label = c.kind === "issue"
-    ? `Issue #${c.issueId} (${c.noteType})`
+  const isIssue = c.kind === "issue";
+  const label = isIssue
+    ? `#${c.issueId} · ${c.noteType}`
     : `${c.sourcePdf.split("/").pop()?.replace(".pdf", "")} · ${pageLabel(c.pageFirst, c.pageLast)}`;
-  const color = c.kind === "issue" ? FS_NAVY : FS_GOLD;
-  const text = c.kind === "issue" ? "#fff" : FS_NAVY;
+
   return (
     <Chip
+      icon={isIssue ? <BugReportOutlinedIcon /> : <DescriptionOutlinedIcon />}
       label={label}
       onClick={onClick}
       size="small"
       sx={{
-        bgcolor: color, color: text, fontWeight: 600, mr: 0.5, mb: 0.5,
-        "&:hover": { bgcolor: color, opacity: 0.85 },
+        bgcolor: isIssue ? FS_SKY_LIGHT : "#FFFFFF",
+        color: isIssue ? FS_NAVY : FS_MUTED,
+        border: `1px solid ${isIssue ? FS_SKY : FS_BORDER}`,
+        fontWeight: 600,
+        fontSize: 11.5,
+        height: 24,
+        mr: 0.5,
+        mb: 0.5,
+        "& .MuiChip-icon": {
+          color: isIssue ? FS_SKY : FS_NAVY,
+          fontSize: 14,
+          ml: 0.5,
+          mr: -0.25,
+        },
+        "& .MuiChip-label": { px: 0.875, letterSpacing: "0.005em" },
+        transition: "all 0.12s",
+        "&:hover": {
+          bgcolor: isIssue ? "#D6E4F6" : "#F4F5F8",
+          borderColor: FS_NAVY,
+        },
       }}
     />
   );
