@@ -118,10 +118,9 @@ def build_agent():
     return FsiSimAgent()
 
 
-try:
+if _can_build():
     AGENT = build_agent()
-except Exception:
-    AGENT = None
-if AGENT is not None:
     import mlflow
     mlflow.models.set_model(AGENT)
+else:
+    AGENT = None

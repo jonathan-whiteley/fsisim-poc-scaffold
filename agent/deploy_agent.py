@@ -19,14 +19,16 @@ from config import Config
 
 
 PIP_REQUIREMENTS = [
-    "mlflow>=2.18.0",
-    "databricks-agents>=0.10.0",
-    "databricks-langchain>=0.4.0",
-    "langgraph>=0.2.0",
-    "langchain-core>=0.3.0",
+    "mlflow>=3.0.0",
+    "databricks-agents>=1.0.0",
+    "databricks-langchain==0.19.0",
+    "langgraph==1.2.0",
+    "langgraph-prebuilt>=1.1.0",
+    "langchain-core==1.4.0",
+    "langchain-classic>=1.0.0",
     "databricks-sdk>=0.30.0",
-    "unitycatalog-ai>=0.1.0",
-    "unitycatalog-langchain>=0.1.0",
+    "unitycatalog-ai==0.4.0",
+    "unitycatalog-langchain==0.3.0",
 ]
 
 
