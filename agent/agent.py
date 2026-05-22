@@ -60,9 +60,14 @@ def build_agent():
 
     ac = build_agent_config()
     llm = ChatDatabricks(endpoint=ac["llm_endpoint"])
-    # execution_mode='local' bypasses the spark session bootstrap so this
-    # works in both the local conflict-y devloop and the deployed serving env.
-    client = DatabricksFunctionClient(execution_mode="local")
+    # Serverless mode supports UC table functions (our search_* tools return
+    # tables). Local mode is scalar-only. Fall back to local in dev envs that
+    # cannot bootstrap a Spark session (e.g. pyspark+databricks-connect
+    # coexistence locally); the serving runtime always succeeds with serverless.
+    try:
+        client = DatabricksFunctionClient(execution_mode="serverless")
+    except Exception:
+        client = DatabricksFunctionClient(execution_mode="local")
     tk = UCFunctionToolkit(
         function_names=[fn["name"] for fn in ac["uc_functions"]],
         client=client,
