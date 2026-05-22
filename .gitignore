@@ -13,3 +13,6 @@ app/frontend/dist/
 .idea/
 *.egg-info/
 generated_manuals/
+mlruns/
+mlflow.db
+mlartifacts/
