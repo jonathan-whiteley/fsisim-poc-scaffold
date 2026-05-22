@@ -1,8 +1,17 @@
-"""Thin client over the deployed Mosaic AI agent serving endpoint."""
+"""Thin client over the deployed Mosaic AI ResponsesAgent serving endpoint.
+
+The endpoint accepts Responses-API payloads (`input=[{role, content}]`) and
+returns a Responses-API object (`output=[{type:'message', content:[{type:'output_text', text}]}]`).
+
+We non-stream the call (single round trip) and surface the assistant text plus
+any tool-call records to the frontend as a small ordered sequence of events.
+"""
 from __future__ import annotations
 import os
 import json
-from typing import AsyncIterator, Iterable
+from typing import AsyncIterator
+import httpx
+
 from databricks.sdk import WorkspaceClient
 
 
@@ -12,42 +21,58 @@ class AgentClient:
         if not self.endpoint:
             raise RuntimeError("AGENT_ENDPOINT_NAME env var not set")
         self.w = WorkspaceClient()
+        self.host = self.w.config.host.rstrip("/")
+        self.url = f"{self.host}/serving-endpoints/{self.endpoint}/invocations"
+
+    def _auth_header(self) -> dict[str, str]:
+        # WorkspaceClient handles whatever auth path (OAuth, PAT, SP) is configured.
+        token = self.w.config.authenticate()
+        # `authenticate()` returns dict-like { 'Authorization': 'Bearer ...' }
+        return token if isinstance(token, dict) else {"Authorization": f"Bearer {token}"}
 
     async def stream_chat(self, messages: list[dict]) -> AsyncIterator[dict]:
-        """Yield agent response chunks. Each chunk is {'type': 'text'|'tool_call', 'content': ...}.
+        """Yield response events. Each event is {'type': 'text'|'tool_call', 'content': ...}.
 
-        The Databricks serving endpoint for a Mosaic AI ResponsesAgent emits an
-        OpenAI-compatible streaming format. We translate it into our simpler
-        two-event shape so the frontend doesn't need to know the OpenAI schema.
+        Non-streaming under the hood; we POST once and break the response into
+        ordered text + tool_call events so the frontend can render citation
+        pills next to the assistant message.
         """
-        # The SDK's streaming surface for serving endpoints is synchronous; iterate
-        # the result and yield to async context.
-        stream = self.w.serving_endpoints.query(
-            name=self.endpoint,
-            messages=messages,
-            stream=True,
-        )
-        for chunk in stream:
-            # Some chunks carry text deltas; others carry tool-call events.
-            # Be defensive about shape variation across SDK versions.
-            try:
-                if hasattr(chunk, "choices") and chunk.choices:
-                    delta = chunk.choices[0].delta
-                    if getattr(delta, "content", None):
-                        yield {"type": "text", "content": delta.content}
-                    for tc in getattr(delta, "tool_calls", []) or []:
-                        fn = getattr(tc, "function", None)
-                        if fn:
-                            yield {
-                                "type": "tool_call",
-                                "content": {
-                                    "name": getattr(fn, "name", ""),
-                                    "args": getattr(fn, "arguments", "") or "",
-                                },
-                            }
-                # Tool results may arrive on the message object directly
-                elif isinstance(chunk, dict):
-                    if "content" in chunk and isinstance(chunk["content"], str):
-                        yield {"type": "text", "content": chunk["content"]}
-            except Exception as e:
-                yield {"type": "text", "content": f"\n[client error: {type(e).__name__}: {e}]"}
+        payload = {"input": [{"role": m["role"], "content": m["content"]} for m in messages]}
+        try:
+            async with httpx.AsyncClient(timeout=120.0) as client:
+                resp = await client.post(self.url, headers=self._auth_header(), json=payload)
+                resp.raise_for_status()
+                body = resp.json()
+        except httpx.HTTPStatusError as e:
+            yield {"type": "text", "content": f"[agent endpoint returned {e.response.status_code}: {e.response.text[:300]}]"}
+            return
+        except Exception as e:
+            yield {"type": "text", "content": f"[agent endpoint error: {type(e).__name__}: {e}]"}
+            return
+
+        for item in body.get("output", []) or []:
+            itype = item.get("type")
+            if itype == "function_call":
+                yield {
+                    "type": "tool_call",
+                    "content": {
+                        "name": item.get("name", ""),
+                        "args": item.get("arguments", "") or "",
+                    },
+                }
+            elif itype == "function_call_output":
+                # Tool result: stash on the most recent tool_call by streaming it
+                # as a synthetic event the frontend can correlate.
+                yield {
+                    "type": "tool_result",
+                    "content": {
+                        "call_id": item.get("call_id", ""),
+                        "output": item.get("output", ""),
+                    },
+                }
+            elif itype == "message":
+                for part in item.get("content", []) or []:
+                    if part.get("type") in ("output_text", "text"):
+                        text = part.get("text", "")
+                        if text:
+                            yield {"type": "text", "content": text}
