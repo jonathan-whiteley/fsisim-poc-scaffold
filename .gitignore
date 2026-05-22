@@ -12,3 +12,4 @@ app/frontend/dist/
 .vscode/
 .idea/
 *.egg-info/
+generated_manuals/
