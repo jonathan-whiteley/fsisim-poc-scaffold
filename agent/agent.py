@@ -12,7 +12,11 @@ from __future__ import annotations
 from typing import Any, Generator
 
 from config import Config
-from agent.prompts import SYSTEM_PROMPT
+
+try:
+    from agent.prompts import SYSTEM_PROMPT
+except ModuleNotFoundError:
+    from prompts import SYSTEM_PROMPT
 
 
 def build_agent_config() -> dict[str, Any]:
