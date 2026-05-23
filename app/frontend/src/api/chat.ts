@@ -5,10 +5,25 @@ export type Chunk =
 export async function* streamChat(messages: { role: string; content: string }[]): AsyncGenerator<Chunk> {
   const resp = await fetch("/api/chat", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
+    credentials: "include",
     body: JSON.stringify({ messages }),
   });
-  if (!resp.body) throw new Error("no stream");
+
+  if (!resp.ok) {
+    let detail = "";
+    try { detail = await resp.text(); } catch {}
+    yield {
+      type: "text",
+      content: `Request failed (${resp.status}). ${detail.slice(0, 400) || resp.statusText}`,
+    };
+    return;
+  }
+  if (!resp.body) {
+    yield { type: "text", content: "Server returned an empty response." };
+    return;
+  }
+
   const reader = resp.body.getReader();
   const dec = new TextDecoder();
   let buf = "";
@@ -21,7 +36,13 @@ export async function* streamChat(messages: { role: string; content: string }[])
     for (const ev of events) {
       const line = ev.split("\n").find(l => l.startsWith("data:"));
       if (!line) continue;
-      yield JSON.parse(line.slice(5).trim()) as Chunk;
+      const payload = line.slice(5).trim();
+      if (!payload) continue;
+      try {
+        yield JSON.parse(payload) as Chunk;
+      } catch (e) {
+        yield { type: "text", content: `[parse error on event: ${payload.slice(0, 200)}]` };
+      }
     }
   }
 }

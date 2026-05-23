@@ -94,9 +94,29 @@ export default function ChatThread({ examples, pendingExample, onConsumeExample,
           collected.push(...parseCitations(ev.content, ev.content.args));
         }
       }
+      if (!acc) {
+        // Stream closed with no text events; surface a friendly fallback
+        setMessages(m => {
+          const copy = [...m];
+          copy[copy.length - 1] = {
+            ...copy[copy.length - 1],
+            text: "The agent returned an empty response. Try again in a moment or rephrase the question.",
+          };
+          return copy;
+        });
+      }
       setMessages(m => {
         const copy = [...m];
         copy[copy.length - 1] = { ...copy[copy.length - 1], citations: collected };
+        return copy;
+      });
+    } catch (err) {
+      setMessages(m => {
+        const copy = [...m];
+        copy[copy.length - 1] = {
+          ...copy[copy.length - 1],
+          text: `Network error: ${err instanceof Error ? err.message : String(err)}`,
+        };
         return copy;
       });
     } finally {
