@@ -72,7 +72,7 @@ export default function MessageBubble({ role, text, citations, streaming, onCita
           }}
         >
           {isUser ? (
-            <Typography sx={{ whiteSpace: "pre-wrap" }}>{text}</Typography>
+            <Typography sx={{ whiteSpace: "pre-wrap", color: "#FFFFFF" }}>{text}</Typography>
           ) : text ? (
             <ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>
           ) : streaming ? (

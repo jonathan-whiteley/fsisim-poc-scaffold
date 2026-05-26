@@ -38,7 +38,7 @@ export default function App() {
                 opacity: 0.96,
               }}
             />
-            <Box sx={{ width: 1, height: 22, bgcolor: "rgba(255,255,255,0.18)", mx: 1.5 }} />
+            <Box sx={{ width: "1px", height: 22, bgcolor: "rgba(255,255,255,0.18)", mx: 1.5, flexShrink: 0 }} />
             <Stack direction="row" sx={{ alignItems: "center", gap: 1 }}>
               <FlightTakeoffIcon sx={{ color: FS_SKY, fontSize: 18 }} />
               <Typography
