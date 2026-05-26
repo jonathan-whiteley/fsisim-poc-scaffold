@@ -1,48 +1,43 @@
-export type Chunk =
-  | { type: "text"; content: string }
-  | { type: "tool_call"; content: { name: string; args: string } };
+export interface ChatResponse {
+  text: string;
+  tool_calls: { name: string; args: string }[];
+  error: string | null;
+}
 
-export async function* streamChat(messages: { role: string; content: string }[]): AsyncGenerator<Chunk> {
-  const resp = await fetch("/api/chat", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
-    credentials: "include",
-    body: JSON.stringify({ messages }),
-  });
+export async function sendChat(messages: { role: string; content: string }[]): Promise<ChatResponse> {
+  let resp: Response;
+  try {
+    resp = await fetch("/api/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({ messages }),
+    });
+  } catch (e) {
+    return {
+      text: `Network error reaching the app backend: ${e instanceof Error ? e.message : String(e)}`,
+      tool_calls: [],
+      error: "network",
+    };
+  }
 
   if (!resp.ok) {
     let detail = "";
     try { detail = await resp.text(); } catch {}
-    yield {
-      type: "text",
-      content: `Request failed (${resp.status}). ${detail.slice(0, 400) || resp.statusText}`,
+    return {
+      text: `Request failed (${resp.status} ${resp.statusText}).\n\n${detail.slice(0, 600)}`,
+      tool_calls: [],
+      error: `http_${resp.status}`,
     };
-    return;
-  }
-  if (!resp.body) {
-    yield { type: "text", content: "Server returned an empty response." };
-    return;
   }
 
-  const reader = resp.body.getReader();
-  const dec = new TextDecoder();
-  let buf = "";
-  while (true) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    buf += dec.decode(value, { stream: true });
-    const events = buf.split("\n\n");
-    buf = events.pop() ?? "";
-    for (const ev of events) {
-      const line = ev.split("\n").find(l => l.startsWith("data:"));
-      if (!line) continue;
-      const payload = line.slice(5).trim();
-      if (!payload) continue;
-      try {
-        yield JSON.parse(payload) as Chunk;
-      } catch (e) {
-        yield { type: "text", content: `[parse error on event: ${payload.slice(0, 200)}]` };
-      }
-    }
+  try {
+    return await resp.json();
+  } catch (e) {
+    return {
+      text: `Could not parse server response: ${e instanceof Error ? e.message : String(e)}`,
+      tool_calls: [],
+      error: "parse",
+    };
   }
 }

@@ -5,7 +5,7 @@ import FlightTakeoffIcon from "@mui/icons-material/FlightTakeoff";
 import MessageBubble from "./MessageBubble";
 import type { Citation } from "./CitationPill";
 import CitationSlideOver from "./CitationSlideOver";
-import { streamChat } from "../api/chat";
+import { sendChat } from "../api/chat";
 import { FS_NAVY, FS_SKY, FS_SKY_LIGHT, FS_BORDER, FS_MUTED, FS_SURFACE } from "../theme";
 
 interface Message {
@@ -78,44 +78,18 @@ export default function ChatThread({ examples, pendingExample, onConsumeExample,
     const assistantMsg: Message = { role: "assistant", text: "", citations: [] };
     setMessages(m => [...m, assistantMsg]);
 
-    let acc = "";
-    const collected: Citation[] = [];
     try {
-      for await (const ch of streamChat(next.map(m => ({ role: m.role, content: m.text })))) {
-        if (ch.type === "text") {
-          acc += ch.content;
-          setMessages(m => {
-            const copy = [...m];
-            copy[copy.length - 1] = { ...copy[copy.length - 1], text: acc };
-            return copy;
-          });
-        } else if (ch.type === "tool_call") {
-          const ev = ch as { content: { name: string; args: string } };
-          collected.push(...parseCitations(ev.content, ev.content.args));
-        }
+      const result = await sendChat(next.map(m => ({ role: m.role, content: m.text })));
+      const citations: Citation[] = [];
+      for (const tc of result.tool_calls) {
+        citations.push(...parseCitations(tc, tc.args));
       }
-      if (!acc) {
-        // Stream closed with no text events; surface a friendly fallback
-        setMessages(m => {
-          const copy = [...m];
-          copy[copy.length - 1] = {
-            ...copy[copy.length - 1],
-            text: "The agent returned an empty response. Try again in a moment or rephrase the question.",
-          };
-          return copy;
-        });
-      }
-      setMessages(m => {
-        const copy = [...m];
-        copy[copy.length - 1] = { ...copy[copy.length - 1], citations: collected };
-        return copy;
-      });
-    } catch (err) {
       setMessages(m => {
         const copy = [...m];
         copy[copy.length - 1] = {
           ...copy[copy.length - 1],
-          text: `Network error: ${err instanceof Error ? err.message : String(err)}`,
+          text: result.text || "(no response)",
+          citations,
         };
         return copy;
       });
