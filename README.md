@@ -1,28 +1,22 @@
 # fsisim-poc-scaffold
 
-A working, FlightSafety-branded reference implementation of the FSISIM
-Technician Issue Resolution Agent. Mock data, two Mosaic AI Vector Search
-indexes, a Mosaic AI Agent with two tools, and a React + FastAPI app
-deployed as a Databricks App.
-
-Companion docs (Obsidian vault):
-- Spec: `~/Desktop/Vault/Work/Projects/fsisim-poc-scaffold/Project.md`
-- Plan: `~/Desktop/Vault/Work/Projects/fsisim-poc-scaffold/Implementation-Plan.md`
-- Architecture (customer-facing): `FSI SIM POC Solution Overview - May 14.docx`
+A reference implementation of an issue resolution agent for flight simulator
+maintenance. Synthetic data, two Mosaic AI Vector Search indexes, a Mosaic
+AI Agent with two tools, and a React + FastAPI app deployed as a Databricks
+App.
 
 ## What this is (and isn't)
 
-This is a SCAFFOLD with synthetic data. It exists so:
-
-1. Matt's team has a working Databricks pattern to copy when he returns from vacation.
-2. The architecture is de-risked end-to-end before real FSISIM data lands.
-3. Stakeholders see concrete progress while the expectations reset is in flight.
+This is a scaffold with synthetic data. The point is to de-risk the
+architecture end-to-end before real data lands, and to provide a working
+Databricks pattern that can be forked and repointed at a production catalog.
 
 It does NOT:
-- Use real FSISIM data
-- Cover the full 25 PDF manual corpus
-- Run the MLflow Agent Evaluation harness (v2)
-- Try to generate step-by-step troubleshooting outputs (the data only logs resolutions)
+- Use real data
+- Cover a full manual corpus (ships with 6 fabricated PDFs)
+- Run the MLflow Agent Evaluation harness
+- Generate step-by-step troubleshooting outputs (the synthetic data only
+  captures past resolutions)
 
 ## Architecture
 
@@ -61,7 +55,7 @@ python -m data_gen.write_issues
 # 5. Generate manual PDFs (~6 docs, ~1 min) and upload to volume
 python -m data_gen.gen_manuals
 for f in generated_manuals/*.pdf; do
-  databricks fs cp "$f" "dbfs:/Volumes/${FSISIM_CATALOG:-jdub_demo}/fsisim_issue_ai_gold/manuals/$(basename $f)" --overwrite
+  databricks fs cp "$f" "dbfs:/Volumes/${FSISIM_CATALOG:-your_catalog}/fsisim_issue_ai_gold/manuals/$(basename $f)" --overwrite
 done
 
 # 6. Parse and chunk manuals (requires ai_prep_search Beta enabled)
@@ -83,9 +77,10 @@ cd app/frontend && npm install && npm run build && cd ../..
 # 11. Create the Databricks App (first time only)
 databricks apps create fsisim-scaffold
 
-# 12. Sync source to the workspace (app/.databricksignore excludes node_modules,
-#     frontend/src, package.json, etc. — only backend/, app.yaml, requirements.txt,
-#     and frontend/dist/ end up in the workspace path)
+# 12. Sync source to the workspace. app/.databricksignore excludes
+#     node_modules, frontend/src, package.json, etc., so only backend/,
+#     app.yaml, requirements.txt, and frontend/dist/ end up in the
+#     workspace path.
 databricks sync ./app /Workspace/Users/<your-email>/fsisim-scaffold --watch=false
 
 # 13. Push the built frontend dist/ directly (databricks sync respects the root
@@ -101,24 +96,6 @@ databricks workspace import-dir \
 databricks apps deploy fsisim-scaffold \
   --source-code-path /Workspace/Users/<your-email>/fsisim-scaffold
 ```
-
-### Deploy gotchas (learned the hard way)
-
-- **NEVER let `frontend/package.json` or `frontend/node_modules` reach the
-  workspace path.** The Apps build platform auto-detects Node and runs
-  `npm install`, which exceeds the 10-minute app-start deadline when MUI
-  icons are involved. The included `app/.databricksignore` strips them.
-- **`databricks sync` skips `dist/`** because the root `.gitignore` lists
-  `app/frontend/dist/`. You MUST push the built bundle with
-  `workspace import-dir` (step 13) or the app keeps serving the old
-  `index-<hash>.js` even after a "successful" deploy.
-- Verify the deployed bundle matches local:
-  ```bash
-  ls app/frontend/dist/assets/
-  databricks workspace list \
-    /Workspace/Users/<your-email>/fsisim-scaffold/frontend/dist/assets
-  ```
-  The `index-<hash>.js` filenames must match.
 
 ## Forking for production
 
@@ -154,7 +131,7 @@ from `config.py` at runtime.
 |-- data_gen/
 |   |-- schema.py            # PySpark schema for g001_issue (28 cols)
 |   |-- value_domains.py     # categorical pools (sim names, systems, etc.)
-|   |-- seed_samples.json    # Matt's 5 sample rows verbatim
+|   |-- seed_samples.json    # 5 seed sample rows
 |   |-- note_authoring.py    # NoteAuthor: one call per note via FM API
 |   |-- gen_issues.py        # IssueGenerator with seed-determinism + arc logic
 |   |-- write_issues.py      # parallel LLM authoring + parquet + CTAS to Delta
@@ -175,8 +152,8 @@ from `config.py` at runtime.
 |   `-- frontend/
 |       |-- src/
 |       |   |-- theme.ts             # FS_NAVY #003865, FS_GOLD #FFB81C, Roboto
-|       |   |-- App.tsx              # top bar + left rail + chat + footer
-|       |   |-- api/chat.ts          # SSE generator
+|       |   |-- App.tsx              # top bar + left rail + chat
+|       |   |-- api/chat.ts          # POST /api/chat client
 |       |   `-- components/
 |       |       |-- LeftRail.tsx
 |       |       |-- ChatThread.tsx
@@ -194,13 +171,12 @@ from `config.py` at runtime.
   doesn't have them, the manuals pipeline falls back to plain `ai_parse_document`
   with hand-rolled chunking.
 - The app uses Databricks Apps SSO; no separate auth layer.
-- All manual PDFs are watermarked SAMPLE / NOT REAL. Do NOT strip the watermark
-  when forking; it's a hedge against the synthetic content being mistaken for
-  real FlightSafety internal docs.
-- The business-expectations gap (customer wants ordered troubleshooting steps,
-  but the FSISIM data only captures resolutions) is mitigated in the system
-  prompt, but the real fix is Matt and Sanjay resetting expectations with
-  the business.
+- All manual PDFs are watermarked SAMPLE / NOT REAL. Do not strip the
+  watermark when forking; it's a hedge against the synthetic content being
+  mistaken for real internal docs.
+- The synthetic data only captures past resolutions, not ordered
+  troubleshooting steps. The agent surfaces prior resolutions rather than
+  inventing a procedure.
 
 ## Cost notes
 

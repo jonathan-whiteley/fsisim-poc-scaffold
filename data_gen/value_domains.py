@@ -1,8 +1,7 @@
 """Categorical value pools for synthetic issue generation.
 
-Seeds from Matt's 5 sample rows and expands realistically. Pools are tuned
-to match what Matt described as the typical FSISIM mix (rough 60/25/10/5
-mechanical/software/electrical/other).
+Seeds from 5 sample rows and expands realistically. Pools are tuned to a
+typical FSISIM mix (rough 60/25/10/5 mechanical/software/electrical/other).
 """
 from dataclasses import dataclass
 

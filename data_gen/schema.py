@@ -1,7 +1,6 @@
 """PySpark schema for poc_data.fsisim_issue_ai_gold.g001_issue.
 
-Mirrors Matt Geissman's gold schema (28 columns, note-grain).
-Source of truth: 'Gold Schema Sample DataFrame.html' notebook export.
+Gold schema (28 columns, note-grain) for the FSISIM issue records.
 """
 from pyspark.sql.types import (
     StructType, StructField, StringType, IntegerType,
