@@ -16,39 +16,37 @@ interface Message {
 
 interface Props {
   examples: string[];
-  pendingExample: string | null;
-  onConsumeExample: () => void;
-  onPickExample: (q: string) => void;
 }
 
-function parseCitations(toolCallContent: { name: string; args: string }, toolResult: unknown): Citation[] {
-  try {
-    const parsed = typeof toolResult === "string" ? JSON.parse(toolResult) : toolResult;
-    const rows = (parsed as { data_array?: unknown[]; rows?: unknown[] })?.data_array
-      ?? (parsed as { data_array?: unknown[]; rows?: unknown[] })?.rows
-      ?? [];
-    if (toolCallContent.name.endsWith("search_past_issues")) {
-      return (rows as unknown[][]).map((r) => ({
-        kind: "issue" as const,
-        issueId: r[0] as number,
-        noteType: r[4] as string,
-        preview: r[5] as string,
-      }));
-    }
-    if (toolCallContent.name.endsWith("search_technical_manuals")) {
-      return (rows as unknown[][]).map((r) => ({
-        kind: "manual" as const,
-        sourcePdf: r[0] as string,
-        pageFirst: r[1] as number,
-        pageLast: r[2] as number,
-        preview: r[3] as string,
-      }));
-    }
-  } catch {}
-  return [];
+import type { ChatResponse } from "../api/chat";
+
+function buildCitations(resp: ChatResponse): Citation[] {
+  const out: Citation[] = [];
+  for (const m of resp.manual_citations || []) {
+    out.push({
+      kind: "manual",
+      sourcePdf: m.source_pdf,
+      filename: m.filename,
+      title: m.title,
+      pageFirst: m.page_first,
+      pageLast: m.page_last,
+      preview: m.preview,
+    });
+  }
+  for (const i of resp.issue_citations || []) {
+    out.push({
+      kind: "issue",
+      issueId: i.issue_id,
+      issueType: i.issue_type,
+      simName: i.sim_name,
+      noteType: i.note_type,
+      preview: i.preview,
+    });
+  }
+  return out;
 }
 
-export default function ChatThread({ examples, pendingExample, onConsumeExample, onPickExample }: Props) {
+export default function ChatThread({ examples }: Props) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
@@ -58,13 +56,6 @@ export default function ChatThread({ examples, pendingExample, onConsumeExample,
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
-
-  useEffect(() => {
-    if (pendingExample) {
-      setInput(pendingExample);
-      onConsumeExample();
-    }
-  }, [pendingExample, onConsumeExample]);
 
   async function send(textOverride?: string) {
     const content = (textOverride ?? input).trim();
@@ -80,16 +71,12 @@ export default function ChatThread({ examples, pendingExample, onConsumeExample,
 
     try {
       const result = await sendChat(next.map(m => ({ role: m.role, content: m.text })));
-      const citations: Citation[] = [];
-      for (const tc of result.tool_calls) {
-        citations.push(...parseCitations(tc, tc.args));
-      }
       setMessages(m => {
         const copy = [...m];
         copy[copy.length - 1] = {
           ...copy[copy.length - 1],
           text: result.text || "(no response)",
-          citations,
+          citations: buildCitations(result),
         };
         return copy;
       });
@@ -112,7 +99,7 @@ export default function ChatThread({ examples, pendingExample, onConsumeExample,
         }}
       >
         <Container maxWidth="md" sx={{ flex: 1, display: "flex", flexDirection: "column", py: hasMessages ? 3 : 0 }}>
-          {!hasMessages && <EmptyHero examples={examples} onPickExample={(q) => { onPickExample(q); send(q); }} />}
+          {!hasMessages && <EmptyHero examples={examples} onPickExample={(q) => send(q)} />}
           {hasMessages && (
             <Stack sx={{ flex: 1, width: "100%" }}>
               {messages.map((m, i) => {

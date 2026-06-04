@@ -77,11 +77,48 @@ python -c "from agent.tools import apply; apply()"   # if you wired tools.sql to
 # 9. Deploy the agent as a serving endpoint
 python -m agent.deploy_agent
 
-# 10. Build the frontend, then deploy the Databricks App
+# 10. Build the frontend locally
 cd app/frontend && npm install && npm run build && cd ../..
+
+# 11. Create the Databricks App (first time only)
 databricks apps create fsisim-scaffold
-databricks apps deploy fsisim-scaffold --source-code-path "$PWD/app"
+
+# 12. Sync source to the workspace (app/.databricksignore excludes node_modules,
+#     frontend/src, package.json, etc. — only backend/, app.yaml, requirements.txt,
+#     and frontend/dist/ end up in the workspace path)
+databricks sync ./app /Workspace/Users/<your-email>/fsisim-scaffold --watch=false
+
+# 13. Push the built frontend dist/ directly (databricks sync respects the root
+#     .gitignore which excludes dist/, so it must be uploaded out-of-band)
+databricks workspace delete \
+  /Workspace/Users/<your-email>/fsisim-scaffold/frontend/dist --recursive 2>/dev/null
+databricks workspace import-dir \
+  ./app/frontend/dist \
+  /Workspace/Users/<your-email>/fsisim-scaffold/frontend/dist \
+  --overwrite
+
+# 14. Deploy
+databricks apps deploy fsisim-scaffold \
+  --source-code-path /Workspace/Users/<your-email>/fsisim-scaffold
 ```
+
+### Deploy gotchas (learned the hard way)
+
+- **NEVER let `frontend/package.json` or `frontend/node_modules` reach the
+  workspace path.** The Apps build platform auto-detects Node and runs
+  `npm install`, which exceeds the 10-minute app-start deadline when MUI
+  icons are involved. The included `app/.databricksignore` strips them.
+- **`databricks sync` skips `dist/`** because the root `.gitignore` lists
+  `app/frontend/dist/`. You MUST push the built bundle with
+  `workspace import-dir` (step 13) or the app keeps serving the old
+  `index-<hash>.js` even after a "successful" deploy.
+- Verify the deployed bundle matches local:
+  ```bash
+  ls app/frontend/dist/assets/
+  databricks workspace list \
+    /Workspace/Users/<your-email>/fsisim-scaffold/frontend/dist/assets
+  ```
+  The `index-<hash>.js` filenames must match.
 
 ## Forking for production
 
@@ -131,8 +168,9 @@ from `config.py` at runtime.
 |-- app/
 |   |-- app.yaml             # Databricks Apps manifest
 |   |-- requirements.txt
+|   |-- .databricksignore    # excludes node_modules + frontend source from deploys
 |   |-- backend/
-|   |   |-- main.py          # FastAPI: /api/health, /api/chat (SSE)
+|   |   |-- main.py          # FastAPI: /api/health, /api/chat, /api/manuals, /api/_diag
 |   |   `-- agent_client.py
 |   `-- frontend/
 |       |-- src/
@@ -161,8 +199,8 @@ from `config.py` at runtime.
   real FlightSafety internal docs.
 - The business-expectations gap (customer wants ordered troubleshooting steps,
   but the FSISIM data only captures resolutions) is mitigated in the system
-  prompt and in the footer disclaimer, but the real fix is Matt and Sanjay
-  resetting expectations with the business.
+  prompt, but the real fix is Matt and Sanjay resetting expectations with
+  the business.
 
 ## Cost notes
 

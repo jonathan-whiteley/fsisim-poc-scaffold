@@ -1,7 +1,6 @@
-import { useState } from "react";
-import { Box, AppBar, Toolbar, Avatar, Stack, Typography, Chip } from "@mui/material";
+import { Box, AppBar, Toolbar, Avatar, Stack, Typography } from "@mui/material";
 import FlightTakeoffIcon from "@mui/icons-material/FlightTakeoff";
-import { FS_NAVY, FS_SKY, FS_BORDER, FS_MUTED } from "./theme";
+import { FS_NAVY, FS_SKY } from "./theme";
 import ChatThread from "./components/ChatThread";
 
 export const EXAMPLES = [
@@ -13,8 +12,6 @@ export const EXAMPLES = [
 ];
 
 export default function App() {
-  const [pendingExample, setPendingExample] = useState<string | null>(null);
-
   return (
     <Box sx={{ display: "flex", flexDirection: "column", height: "100vh", bgcolor: "background.default" }}>
       <AppBar
@@ -49,29 +46,12 @@ export default function App() {
                   letterSpacing: "-0.005em",
                 }}
               >
-                FSISIM Issue Resolution Assistant
+                FSISIM Issue Resolution Agent
               </Typography>
-              <Chip
-                label="SCAFFOLD"
-                size="small"
-                sx={{
-                  bgcolor: "rgba(255,255,255,0.08)",
-                  color: "rgba(255,255,255,0.7)",
-                  fontSize: 10,
-                  fontWeight: 700,
-                  letterSpacing: "0.08em",
-                  height: 20,
-                  border: "1px solid rgba(255,255,255,0.15)",
-                  "& .MuiChip-label": { px: 1 },
-                }}
-              />
             </Stack>
           </Stack>
           <Box sx={{ flex: 1 }} />
           <Stack direction="row" sx={{ alignItems: "center", gap: 2 }}>
-            <Typography sx={{ color: "rgba(255,255,255,0.55)", fontSize: 12, display: { xs: "none", md: "block" } }}>
-              Mock data
-            </Typography>
             <Avatar
               sx={{
                 width: 32,
@@ -90,26 +70,7 @@ export default function App() {
 
       <Box sx={{ display: "flex", flex: 1, overflow: "hidden" }}>
         <Box sx={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", position: "relative" }}>
-          <ChatThread
-            examples={EXAMPLES}
-            pendingExample={pendingExample}
-            onConsumeExample={() => setPendingExample(null)}
-            onPickExample={setPendingExample}
-          />
-          <Box
-            sx={{
-              py: 0.75,
-              px: 2,
-              textAlign: "center",
-              color: FS_MUTED,
-              fontSize: 11,
-              bgcolor: "#F4F5F8",
-              borderTop: `1px solid ${FS_BORDER}`,
-              letterSpacing: "0.03em",
-            }}
-          >
-            Scaffold build · Synthetic data · Not for customer use
-          </Box>
+          <ChatThread examples={EXAMPLES} />
         </Box>
       </Box>
     </Box>

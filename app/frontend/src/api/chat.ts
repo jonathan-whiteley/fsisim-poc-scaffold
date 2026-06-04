@@ -1,6 +1,24 @@
+export interface ManualCitation {
+  source_pdf: string;
+  filename: string;
+  title: string;
+  page_first: number;
+  page_last: number;
+  preview: string;
+}
+
+export interface IssueCitation {
+  issue_id: number;
+  issue_type: string;
+  sim_name: string;
+  note_type: string;
+  preview: string;
+}
+
 export interface ChatResponse {
   text: string;
-  tool_calls: { name: string; args: string }[];
+  manual_citations: ManualCitation[];
+  issue_citations: IssueCitation[];
   error: string | null;
 }
 
@@ -14,30 +32,20 @@ export async function sendChat(messages: { role: string; content: string }[]): P
       body: JSON.stringify({ messages }),
     });
   } catch (e) {
-    return {
-      text: `Network error reaching the app backend: ${e instanceof Error ? e.message : String(e)}`,
-      tool_calls: [],
-      error: "network",
-    };
+    return _err(`Network error reaching the app backend: ${e instanceof Error ? e.message : String(e)}`, "network");
   }
-
   if (!resp.ok) {
     let detail = "";
     try { detail = await resp.text(); } catch {}
-    return {
-      text: `Request failed (${resp.status} ${resp.statusText}).\n\n${detail.slice(0, 600)}`,
-      tool_calls: [],
-      error: `http_${resp.status}`,
-    };
+    return _err(`Request failed (${resp.status} ${resp.statusText}).\n\n${detail.slice(0, 600)}`, `http_${resp.status}`);
   }
-
   try {
     return await resp.json();
   } catch (e) {
-    return {
-      text: `Could not parse server response: ${e instanceof Error ? e.message : String(e)}`,
-      tool_calls: [],
-      error: "parse",
-    };
+    return _err(`Could not parse server response: ${e instanceof Error ? e.message : String(e)}`, "parse");
   }
+}
+
+function _err(text: string, error: string): ChatResponse {
+  return { text, manual_citations: [], issue_citations: [], error };
 }

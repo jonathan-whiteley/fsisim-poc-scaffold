@@ -4,8 +4,8 @@ import BugReportOutlinedIcon from "@mui/icons-material/BugReportOutlined";
 import { FS_NAVY, FS_SKY, FS_SKY_LIGHT, FS_BORDER, FS_MUTED } from "../theme";
 
 export type Citation =
-  | { kind: "issue"; issueId: number; noteType: string; preview: string }
-  | { kind: "manual"; sourcePdf: string; pageFirst: number; pageLast: number; preview: string };
+  | { kind: "issue"; issueId: number; issueType: string; simName: string; noteType: string; preview: string }
+  | { kind: "manual"; sourcePdf: string; filename: string; title: string; pageFirst: number; pageLast: number; preview: string };
 
 interface Props {
   c: Citation;
@@ -21,8 +21,8 @@ function pageLabel(first: number, last: number): string {
 export default function CitationPill({ c, onClick }: Props) {
   const isIssue = c.kind === "issue";
   const label = isIssue
-    ? `#${c.issueId} · ${c.noteType}`
-    : `${c.sourcePdf.split("/").pop()?.replace(".pdf", "")} · ${pageLabel(c.pageFirst, c.pageLast)}`;
+    ? `Issue #${c.issueId} · ${c.simName}`
+    : `${c.title} · ${pageLabel(c.pageFirst, c.pageLast)}`;
 
   return (
     <Chip
@@ -39,6 +39,7 @@ export default function CitationPill({ c, onClick }: Props) {
         height: 24,
         mr: 0.5,
         mb: 0.5,
+        cursor: "pointer",
         "& .MuiChip-icon": {
           color: isIssue ? FS_SKY : FS_NAVY,
           fontSize: 14,
@@ -50,6 +51,7 @@ export default function CitationPill({ c, onClick }: Props) {
         "&:hover": {
           bgcolor: isIssue ? "#D6E4F6" : "#F4F5F8",
           borderColor: FS_NAVY,
+          color: FS_NAVY,
         },
       }}
     />
