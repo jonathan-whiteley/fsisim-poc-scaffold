@@ -1,6 +1,13 @@
 bundle:
   name: fsisim_poc_scaffold
 
+sync:
+  # `.gitignore` excludes `app/frontend/dist/` (since the bundle ships only
+  # the built bundle, not source). Force-include it so the deployed App can
+  # serve the SPA.
+  include:
+    - app/frontend/dist/**
+
 variables:
   catalog:
     default: jdub_demo
