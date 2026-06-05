@@ -370,6 +370,42 @@ async def feedback(req: FeedbackRequest, request: Request):
     return {"ok": True, "message_id": req.message_id, "rating": req.rating}
 
 
+def _persist_turn(
+    session_id: str,
+    user_email: str,
+    role: str,
+    content: str,
+    mlflow_trace_id: str | None = None,
+) -> str:
+    """Insert one row into agent_server.messages; return the message id.
+
+    Best-effort: if Lakebase is unreachable, log + return a synthetic id so
+    the chat response still flows. The thread sidebar will be empty for that
+    turn but the user isn't blocked.
+    """
+    import logging as _logging
+    import psycopg
+    from agent_server.memory import get_pg_connection_string
+
+    message_id = str(uuid.uuid4())
+    sql = """
+        INSERT INTO agent_server.messages
+          (id, session_id, user_email, role, content, mlflow_trace_id)
+        VALUES (%s, %s, %s, %s, %s, %s)
+    """
+    try:
+        with psycopg.connect(get_pg_connection_string(), autocommit=True) as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, (message_id, session_id, user_email, role,
+                                    content, mlflow_trace_id))
+    except Exception as e:
+        _logging.getLogger(__name__).warning(
+            "persist_turn failed (session=%s role=%s): %s: %s",
+            session_id, role, type(e).__name__, e,
+        )
+    return message_id
+
+
 @router.post("/api/chat")
 async def chat(req: ChatRequest, request: Request):
     email = get_user_email(request)
@@ -377,6 +413,10 @@ async def chat(req: ChatRequest, request: Request):
         raise HTTPException(status_code=401, detail="Authentication required")
 
     thread_id = req.thread_id or str(uuid.uuid4())
+
+    # Persist the user turn before invoking the agent so the thread shows up
+    # in the sidebar even if the agent call fails.
+    _persist_turn(thread_id, email, "user", req.content)
 
     agent_req = ResponsesAgentRequest(
         input=[{"role": "user", "content": req.content}],
@@ -386,19 +426,21 @@ async def chat(req: ChatRequest, request: Request):
     response = _call_invoke(agent_req)
 
     text = ""
-    assistant_message_id = ""
     for item in response.output:
         if isinstance(item, dict):
             content = item.get("content", [])
-            assistant_message_id = item.get("id", assistant_message_id)
         else:
             content = getattr(item, "content", [])
-            assistant_message_id = getattr(item, "id", assistant_message_id)
         for part in content:
             ptype = part.get("type") if isinstance(part, dict) else getattr(part, "type", None)
             ptext = part.get("text") if isinstance(part, dict) else getattr(part, "text", None)
             if ptype in ("output_text", "text") and ptext:
                 text += ptext
+
+    # Persist the assistant turn with a fresh uuid so feedback can attach to it.
+    assistant_message_id = _persist_turn(
+        thread_id, email, "assistant", text or "(no response)"
+    )
 
     citations = _reissue_citations(req.content)
 
