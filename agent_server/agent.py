@@ -49,17 +49,7 @@ def build_agent_config() -> dict[str, Any]:
     }
 
 
-_LLM = None
 _W = None
-
-
-def _get_llm():
-    """Lazily construct ChatDatabricks; cache for reuse."""
-    global _LLM
-    if _LLM is None:
-        from databricks_langchain import ChatDatabricks
-        _LLM = ChatDatabricks(endpoint=Config().llm_endpoint)
-    return _LLM
 
 
 def _get_w():
@@ -69,6 +59,21 @@ def _get_w():
         from databricks.sdk import WorkspaceClient
         _W = WorkspaceClient()
     return _W
+
+
+def _call_llm(messages: list[dict]) -> str:
+    """Call the LLM serving endpoint directly via SDK; returns the assistant text."""
+    cfg = Config()
+    w = _get_w()
+    resp = w.serving_endpoints.query(
+        name=cfg.llm_endpoint,
+        messages=[{"role": m["role"], "content": m["content"]} for m in messages],
+    )
+    if resp.choices and len(resp.choices) > 0:
+        msg = resp.choices[0].message
+        content = msg.content if hasattr(msg, "content") else msg.get("content", "")
+        return content or ""
+    return ""
 
 
 def _retrieve_context(query: str) -> str:
@@ -130,19 +135,14 @@ def _retrieve_context(query: str) -> str:
     return "\n\n---\n# Retrieved context\n" + "\n\n".join(parts) + "\n---\n"
 
 
-def _to_langchain(items):
-    """Convert ResponsesAgentRequest.input items to LangChain message objects."""
-    from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
+def _to_chat_dicts(items) -> list[dict]:
+    """Convert ResponsesAgentRequest.input items to plain {role, content} dicts."""
     out = []
     for m in items:
         role = m.role if hasattr(m, "role") else m.get("role")
         content = m.content if hasattr(m, "content") else m.get("content")
-        if role == "user":
-            out.append(HumanMessage(content=content))
-        elif role == "assistant":
-            out.append(AIMessage(content=content))
-        elif role == "system":
-            out.append(SystemMessage(content=content))
+        if role in ("user", "assistant", "system") and content:
+            out.append({"role": role, "content": content})
     return out
 
 
@@ -159,42 +159,6 @@ def _last_user_text(items) -> str:
 @invoke()
 def invoke_handler(request: ResponsesAgentRequest) -> ResponsesAgentResponse:
     """Retrieval-augmented single-turn synthesis."""
-    from langchain_core.messages import SystemMessage
-
-    thread_id = get_session_id(request) or "default"
-    try:
-        mlflow.update_current_trace(metadata={"mlflow.trace.session": thread_id})
-    except Exception:
-        pass  # no active trace in some contexts
-
-    last_user = _last_user_text(request.input)
-    context_block = _retrieve_context(last_user) if last_user else ""
-    system_msg = SystemMessage(content=SYSTEM_PROMPT + context_block)
-
-    history = _to_langchain(request.input)
-    messages = [system_msg] + history
-
-    llm = _get_llm()
-    response = llm.invoke(messages)
-    text = response.content if hasattr(response, "content") else str(response)
-    if isinstance(text, list):
-        text = "".join(
-            p.get("text", "") if isinstance(p, dict) else str(p) for p in text
-        )
-
-    return ResponsesAgentResponse(
-        output=[{"type": "message", "id": "msg-final",
-                  "content": [{"type": "output_text", "text": str(text)}]}]
-    )
-
-
-@stream()
-async def stream_handler(
-    request: ResponsesAgentRequest,
-) -> AsyncGenerator[ResponsesAgentStreamEvent, None]:
-    """Streaming handler -- v1 React client doesn't consume it; kept for parity."""
-    from langchain_core.messages import SystemMessage
-
     thread_id = get_session_id(request) or "default"
     try:
         mlflow.update_current_trace(metadata={"mlflow.trace.session": thread_id})
@@ -203,20 +167,47 @@ async def stream_handler(
 
     last_user = _last_user_text(request.input)
     context_block = _retrieve_context(last_user) if last_user else ""
-    system_msg = SystemMessage(content=SYSTEM_PROMPT + context_block)
-    messages = [system_msg] + _to_langchain(request.input)
 
-    llm = _get_llm()
-    counter = 0
-    for chunk in llm.stream(messages):
-        text = chunk.content if hasattr(chunk, "content") else str(chunk)
-        if text:
-            counter += 1
-            yield ResponsesAgentStreamEvent(
-                type="response.output_item.done",
-                item={
-                    "type": "message",
-                    "id": f"msg-{counter}",
-                    "content": [{"type": "output_text", "text": str(text)}],
-                },
-            )
+    messages = [{"role": "system", "content": SYSTEM_PROMPT + context_block}]
+    messages.extend(_to_chat_dicts(request.input))
+
+    text = _call_llm(messages)
+
+    return ResponsesAgentResponse(
+        output=[{"type": "message", "id": "msg-final",
+                  "content": [{"type": "output_text", "text": str(text or "(no response)")}]}]
+    )
+
+
+@stream()
+async def stream_handler(
+    request: ResponsesAgentRequest,
+) -> AsyncGenerator[ResponsesAgentStreamEvent, None]:
+    """Streaming handler -- v1 React client doesn't consume the stream.
+
+    For Agents-as-Apps with the SDK serving_endpoints.query() path, we don't
+    have a clean per-chunk streaming API at hand. Yield a single item with
+    the full response so the stream contract is honored.
+    """
+    thread_id = get_session_id(request) or "default"
+    try:
+        mlflow.update_current_trace(metadata={"mlflow.trace.session": thread_id})
+    except Exception:
+        pass
+
+    last_user = _last_user_text(request.input)
+    context_block = _retrieve_context(last_user) if last_user else ""
+
+    messages = [{"role": "system", "content": SYSTEM_PROMPT + context_block}]
+    messages.extend(_to_chat_dicts(request.input))
+
+    text = _call_llm(messages)
+
+    yield ResponsesAgentStreamEvent(
+        type="response.output_item.done",
+        item={
+            "type": "message",
+            "id": "msg-final",
+            "content": [{"type": "output_text", "text": str(text or "(no response)")}],
+        },
+    )
