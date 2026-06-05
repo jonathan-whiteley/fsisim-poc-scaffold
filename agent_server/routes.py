@@ -111,9 +111,9 @@ async def diag():
 def _fetch_user_threads(user_email: str) -> list[dict]:
     """Read the 10 most-recent threads for this user from agent_server.messages.
 
-    AgentServer's `messages` table doesn't have an explicit `thread_id` column
-    in every schema; the session id is stored in `messages.session_id`. We
-    derive (thread_id, title, updated_at) by aggregating over session_id.
+    Returns [] if the agent_server.messages table doesn't exist yet (it's
+    populated by AgentServer's /invocations pipeline; this app calls @invoke
+    directly so the table may stay empty in v1).
     """
     import psycopg
     from agent_server.memory import get_pg_connection_string
@@ -137,27 +137,33 @@ def _fetch_user_threads(user_email: str) -> list[dict]:
         ORDER BY updated_at DESC
         LIMIT 10
     """
-    with psycopg.connect(get_pg_connection_string(), autocommit=True) as conn:
-        with conn.cursor(row_factory=psycopg.rows.dict_row) as cur:
-            cur.execute(sql, (user_email,))
-            rows = cur.fetchall()
-    for r in rows:
-        if r.get("updated_at") is not None:
-            r["updated_at"] = r["updated_at"].isoformat()
-    return rows
+    try:
+        with psycopg.connect(get_pg_connection_string(), autocommit=True) as conn:
+            with conn.cursor(row_factory=psycopg.rows.dict_row) as cur:
+                cur.execute(sql, (user_email,))
+                rows = cur.fetchall()
+        for r in rows:
+            if r.get("updated_at") is not None:
+                r["updated_at"] = r["updated_at"].isoformat()
+        return rows
+    except psycopg.errors.UndefinedTable:
+        return []
 
 
 def _fetch_thread_owner(thread_id: str) -> str | None:
     import psycopg
     from agent_server.memory import get_pg_connection_string
-    with psycopg.connect(get_pg_connection_string(), autocommit=True) as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "SELECT user_email FROM agent_server.messages WHERE session_id = %s LIMIT 1",
-                (thread_id,),
-            )
-            row = cur.fetchone()
-    return row[0] if row else None
+    try:
+        with psycopg.connect(get_pg_connection_string(), autocommit=True) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT user_email FROM agent_server.messages WHERE session_id = %s LIMIT 1",
+                    (thread_id,),
+                )
+                row = cur.fetchone()
+        return row[0] if row else None
+    except psycopg.errors.UndefinedTable:
+        return None
 
 
 def _fetch_thread_messages(thread_id: str) -> list[dict]:
@@ -171,14 +177,17 @@ def _fetch_thread_messages(thread_id: str) -> list[dict]:
         WHERE session_id = %s
         ORDER BY created_at ASC
     """
-    with psycopg.connect(get_pg_connection_string(), autocommit=True) as conn:
-        with conn.cursor(row_factory=psycopg.rows.dict_row) as cur:
-            cur.execute(sql, (thread_id,))
-            rows = cur.fetchall()
-    for r in rows:
-        if r.get("created_at") is not None:
-            r["created_at"] = r["created_at"].isoformat()
-    return rows
+    try:
+        with psycopg.connect(get_pg_connection_string(), autocommit=True) as conn:
+            with conn.cursor(row_factory=psycopg.rows.dict_row) as cur:
+                cur.execute(sql, (thread_id,))
+                rows = cur.fetchall()
+        for r in rows:
+            if r.get("created_at") is not None:
+                r["created_at"] = r["created_at"].isoformat()
+        return rows
+    except psycopg.errors.UndefinedTable:
+        return []
 
 
 @router.get("/api/threads")
