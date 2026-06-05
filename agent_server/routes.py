@@ -15,8 +15,10 @@ from __future__ import annotations
 import os
 import urllib.parse
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse, PlainTextResponse, Response
+
+from agent_server.utils import get_user_email
 
 import httpx
 
@@ -104,3 +106,97 @@ async def diag():
     except Exception as e:
         out["error"] = f"{type(e).__name__}: {e}"
     return JSONResponse(out)
+
+
+def _fetch_user_threads(user_email: str) -> list[dict]:
+    """Read the 10 most-recent threads for this user from agent_server.messages.
+
+    AgentServer's `messages` table doesn't have an explicit `thread_id` column
+    in every schema; the session id is stored in `messages.session_id`. We
+    derive (thread_id, title, updated_at) by aggregating over session_id.
+    """
+    import psycopg
+    from agent_server.memory import get_pg_connection_string
+
+    sql = """
+        SELECT
+            m.session_id        AS thread_id,
+            -- Title = first user turn's content, truncated; fallback to thread id
+            COALESCE(
+              substring(
+                (SELECT content FROM agent_server.messages mm
+                 WHERE mm.session_id = m.session_id AND mm.role = 'user'
+                 ORDER BY mm.created_at ASC LIMIT 1)
+                FROM 1 FOR 60),
+              m.session_id
+            ) AS title,
+            MAX(m.created_at)    AS updated_at
+        FROM agent_server.messages m
+        WHERE m.user_email = %s
+        GROUP BY m.session_id
+        ORDER BY updated_at DESC
+        LIMIT 10
+    """
+    with psycopg.connect(get_pg_connection_string(), autocommit=True) as conn:
+        with conn.cursor(row_factory=psycopg.rows.dict_row) as cur:
+            cur.execute(sql, (user_email,))
+            rows = cur.fetchall()
+    for r in rows:
+        if r.get("updated_at") is not None:
+            r["updated_at"] = r["updated_at"].isoformat()
+    return rows
+
+
+def _fetch_thread_owner(thread_id: str) -> str | None:
+    import psycopg
+    from agent_server.memory import get_pg_connection_string
+    with psycopg.connect(get_pg_connection_string(), autocommit=True) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT user_email FROM agent_server.messages WHERE session_id = %s LIMIT 1",
+                (thread_id,),
+            )
+            row = cur.fetchone()
+    return row[0] if row else None
+
+
+def _fetch_thread_messages(thread_id: str) -> list[dict]:
+    import psycopg
+    from agent_server.memory import get_pg_connection_string
+    sql = """
+        SELECT
+            id, role, content, created_at,
+            mlflow_trace_id
+        FROM agent_server.messages
+        WHERE session_id = %s
+        ORDER BY created_at ASC
+    """
+    with psycopg.connect(get_pg_connection_string(), autocommit=True) as conn:
+        with conn.cursor(row_factory=psycopg.rows.dict_row) as cur:
+            cur.execute(sql, (thread_id,))
+            rows = cur.fetchall()
+    for r in rows:
+        if r.get("created_at") is not None:
+            r["created_at"] = r["created_at"].isoformat()
+    return rows
+
+
+@router.get("/api/threads")
+async def list_threads(request: Request):
+    email = get_user_email(request)
+    if not email:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    return {"threads": _fetch_user_threads(email)}
+
+
+@router.get("/api/threads/{thread_id}")
+async def get_thread(thread_id: str, request: Request):
+    email = get_user_email(request)
+    if not email:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    owner = _fetch_thread_owner(thread_id)
+    if owner is None:
+        raise HTTPException(status_code=404, detail="Thread not found")
+    if owner != email:
+        raise HTTPException(status_code=403, detail="Not your thread")
+    return {"thread_id": thread_id, "messages": _fetch_thread_messages(thread_id)}
