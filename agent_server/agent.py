@@ -18,10 +18,22 @@ from __future__ import annotations
 import logging
 from typing import Any, AsyncGenerator
 
+import mlflow
+from mlflow.genai.agent_server import invoke, stream
+from mlflow.types.responses import (
+    ResponsesAgentRequest,
+    ResponsesAgentResponse,
+    ResponsesAgentStreamEvent,
+)
+
 from config import Config
 from agent_server.prompts import SYSTEM_PROMPT
+from agent_server.utils import get_session_id
 
 logger = logging.getLogger(__name__)
+
+mlflow.langchain.autolog()
+logging.getLogger("mlflow.utils.autologging_utils").setLevel(logging.ERROR)
 
 
 def build_agent_config() -> dict[str, Any]:
@@ -35,15 +47,6 @@ def build_agent_config() -> dict[str, Any]:
         ],
         "system_prompt": SYSTEM_PROMPT,
     }
-
-
-def _can_build() -> bool:
-    try:
-        import databricks_langchain  # noqa: F401
-        from mlflow.genai.agent_server import invoke  # noqa: F401
-    except Exception:
-        return False
-    return True
 
 
 _LLM = None
@@ -127,102 +130,93 @@ def _retrieve_context(query: str) -> str:
     return "\n\n---\n# Retrieved context\n" + "\n\n".join(parts) + "\n---\n"
 
 
-if _can_build():
-    import mlflow
-    from mlflow.genai.agent_server import invoke, stream
-    from mlflow.types.responses import (
-        ResponsesAgentRequest,
-        ResponsesAgentResponse,
-        ResponsesAgentStreamEvent,
+def _to_langchain(items):
+    """Convert ResponsesAgentRequest.input items to LangChain message objects."""
+    from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
+    out = []
+    for m in items:
+        role = m.role if hasattr(m, "role") else m.get("role")
+        content = m.content if hasattr(m, "content") else m.get("content")
+        if role == "user":
+            out.append(HumanMessage(content=content))
+        elif role == "assistant":
+            out.append(AIMessage(content=content))
+        elif role == "system":
+            out.append(SystemMessage(content=content))
+    return out
+
+
+def _last_user_text(items) -> str:
+    """Return the content of the most recent user turn (empty if none)."""
+    for m in reversed(items):
+        role = m.role if hasattr(m, "role") else m.get("role")
+        if role == "user":
+            content = m.content if hasattr(m, "content") else m.get("content")
+            return content or ""
+    return ""
+
+
+@invoke()
+def invoke_handler(request: ResponsesAgentRequest) -> ResponsesAgentResponse:
+    """Retrieval-augmented single-turn synthesis."""
+    from langchain_core.messages import SystemMessage
+
+    thread_id = get_session_id(request) or "default"
+    try:
+        mlflow.update_current_trace(metadata={"mlflow.trace.session": thread_id})
+    except Exception:
+        pass  # no active trace in some contexts
+
+    last_user = _last_user_text(request.input)
+    context_block = _retrieve_context(last_user) if last_user else ""
+    system_msg = SystemMessage(content=SYSTEM_PROMPT + context_block)
+
+    history = _to_langchain(request.input)
+    messages = [system_msg] + history
+
+    llm = _get_llm()
+    response = llm.invoke(messages)
+    text = response.content if hasattr(response, "content") else str(response)
+    if isinstance(text, list):
+        text = "".join(
+            p.get("text", "") if isinstance(p, dict) else str(p) for p in text
+        )
+
+    return ResponsesAgentResponse(
+        output=[{"type": "message", "id": "msg-final",
+                  "content": [{"type": "output_text", "text": str(text)}]}]
     )
 
-    mlflow.langchain.autolog()
-    logging.getLogger("mlflow.utils.autologging_utils").setLevel(logging.ERROR)
 
-    from agent_server.utils import get_session_id
+@stream()
+async def stream_handler(
+    request: ResponsesAgentRequest,
+) -> AsyncGenerator[ResponsesAgentStreamEvent, None]:
+    """Streaming handler -- v1 React client doesn't consume it; kept for parity."""
+    from langchain_core.messages import SystemMessage
 
-    def _to_langchain(items):
-        """Convert ResponsesAgentRequest.input items to LangChain message objects."""
-        from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
-        out = []
-        for m in items:
-            role = m.role if hasattr(m, "role") else m.get("role")
-            content = m.content if hasattr(m, "content") else m.get("content")
-            if role == "user":
-                out.append(HumanMessage(content=content))
-            elif role == "assistant":
-                out.append(AIMessage(content=content))
-            elif role == "system":
-                out.append(SystemMessage(content=content))
-        return out
+    thread_id = get_session_id(request) or "default"
+    try:
+        mlflow.update_current_trace(metadata={"mlflow.trace.session": thread_id})
+    except Exception:
+        pass
 
-    def _last_user_text(items) -> str:
-        """Return the content of the most recent user turn (empty if none)."""
-        for m in reversed(items):
-            role = m.role if hasattr(m, "role") else m.get("role")
-            if role == "user":
-                content = m.content if hasattr(m, "content") else m.get("content")
-                return content or ""
-        return ""
+    last_user = _last_user_text(request.input)
+    context_block = _retrieve_context(last_user) if last_user else ""
+    system_msg = SystemMessage(content=SYSTEM_PROMPT + context_block)
+    messages = [system_msg] + _to_langchain(request.input)
 
-    @invoke()
-    def invoke_handler(request: ResponsesAgentRequest) -> ResponsesAgentResponse:
-        """Retrieval-augmented single-turn synthesis."""
-        from langchain_core.messages import SystemMessage
-
-        thread_id = get_session_id(request) or "default"
-        mlflow.update_current_trace(
-            metadata={"mlflow.trace.session": thread_id},
-        )
-
-        last_user = _last_user_text(request.input)
-        context_block = _retrieve_context(last_user) if last_user else ""
-        system_msg = SystemMessage(content=SYSTEM_PROMPT + context_block)
-
-        history = _to_langchain(request.input)
-        messages = [system_msg] + history
-
-        llm = _get_llm()
-        response = llm.invoke(messages)
-        text = response.content if hasattr(response, "content") else str(response)
-        if isinstance(text, list):
-            text = "".join(
-                p.get("text", "") if isinstance(p, dict) else str(p) for p in text
+    llm = _get_llm()
+    counter = 0
+    for chunk in llm.stream(messages):
+        text = chunk.content if hasattr(chunk, "content") else str(chunk)
+        if text:
+            counter += 1
+            yield ResponsesAgentStreamEvent(
+                type="response.output_item.done",
+                item={
+                    "type": "message",
+                    "id": f"msg-{counter}",
+                    "content": [{"type": "output_text", "text": str(text)}],
+                },
             )
-
-        return ResponsesAgentResponse(
-            output=[{"type": "message", "id": "msg-final",
-                      "content": [{"type": "output_text", "text": str(text)}]}]
-        )
-
-    @stream()
-    async def stream_handler(
-        request: ResponsesAgentRequest,
-    ) -> AsyncGenerator[ResponsesAgentStreamEvent, None]:
-        """Streaming handler -- v1 React client doesn't consume it; kept for parity."""
-        from langchain_core.messages import SystemMessage
-
-        thread_id = get_session_id(request) or "default"
-        mlflow.update_current_trace(
-            metadata={"mlflow.trace.session": thread_id},
-        )
-
-        last_user = _last_user_text(request.input)
-        context_block = _retrieve_context(last_user) if last_user else ""
-        system_msg = SystemMessage(content=SYSTEM_PROMPT + context_block)
-        messages = [system_msg] + _to_langchain(request.input)
-
-        llm = _get_llm()
-        counter = 0
-        for chunk in llm.stream(messages):
-            text = chunk.content if hasattr(chunk, "content") else str(chunk)
-            if text:
-                counter += 1
-                yield ResponsesAgentStreamEvent(
-                    type="response.output_item.done",
-                    item={
-                        "type": "message",
-                        "id": f"msg-{counter}",
-                        "content": [{"type": "output_text", "text": str(text)}],
-                    },
-                )
