@@ -1,11 +1,18 @@
-"""FSISIM agent: LangGraph ReAct + Lakebase memory, exposed via @invoke / @stream.
+"""FSISIM agent: retrieval-then-synthesize, no UC tool execution.
 
-Module-level side effects on import (intentional; matches the template):
-- mlflow.langchain.autolog() so every LangGraph call emits an MLflow trace
-- @invoke / @stream decorators register the handlers with the AgentServer
+Earlier this agent used LangGraph ReAct + UCFunctionToolkit to call SQL
+table-functions. That path needs databricks-connect at runtime and the
+version matrix doesn't reconcile in the Apps container. This file instead:
 
-The LangGraph graph itself is rebuilt per request to attach the right
-checkpoint thread; the underlying ChatDatabricks + UC toolkit are cached.
+1. Reads the user's last turn from the request.
+2. Queries the past-issues and manual-knowledge Vector Search indexes
+   directly via the Databricks SDK.
+3. Builds a single ChatDatabricks call with the retrieved context injected
+   into the system prompt.
+4. Returns the assistant text.
+
+Conversation memory comes from the FastAPI relay (routes.py) which loads
+prior turns from `agent_server.messages` before calling @invoke.
 """
 from __future__ import annotations
 import logging
@@ -33,53 +40,91 @@ def build_agent_config() -> dict[str, Any]:
 def _can_build() -> bool:
     try:
         import databricks_langchain  # noqa: F401
-        import langgraph  # noqa: F401
         from mlflow.genai.agent_server import invoke  # noqa: F401
     except Exception:
         return False
     return True
 
 
-# Module-level cache: ChatDatabricks + tools are heavy to construct.
 _LLM = None
-_TOOLS = None
+_W = None
 
 
-def _build_llm_and_tools():
-    """Build the LLM client and UC function tools once; cache for reuse."""
-    global _LLM, _TOOLS
-    if _LLM is not None and _TOOLS is not None:
-        return _LLM, _TOOLS
-
-    from databricks_langchain import ChatDatabricks
-    from databricks_langchain.uc_ai import UCFunctionToolkit
-    from unitycatalog.ai.core.databricks import DatabricksFunctionClient
-
-    ac = build_agent_config()
-    _LLM = ChatDatabricks(endpoint=ac["llm_endpoint"])
-    try:
-        client = DatabricksFunctionClient(execution_mode="serverless")
-    except Exception:
-        client = DatabricksFunctionClient(execution_mode="local")
-    tk = UCFunctionToolkit(
-        function_names=[fn["name"] for fn in ac["uc_functions"]],
-        client=client,
-    )
-    _TOOLS = tk.tools
-    return _LLM, _TOOLS
+def _get_llm():
+    """Lazily construct ChatDatabricks; cache for reuse."""
+    global _LLM
+    if _LLM is None:
+        from databricks_langchain import ChatDatabricks
+        _LLM = ChatDatabricks(endpoint=Config().llm_endpoint)
+    return _LLM
 
 
-def _build_graph_for_thread(thread_id: str):
-    """Construct a LangGraph ReAct agent attached to the Lakebase checkpoint
-    for `thread_id`. The graph is cheap to build; the LLM + tools are cached.
+def _get_w():
+    """Lazily construct the WorkspaceClient; cache for reuse."""
+    global _W
+    if _W is None:
+        from databricks.sdk import WorkspaceClient
+        _W = WorkspaceClient()
+    return _W
+
+
+def _retrieve_context(query: str) -> str:
+    """Query both Vector Search indexes for the user's last turn.
+
+    Returns a single markdown block to inject into the system prompt.
+    Empty string if both queries fail (the agent still responds, just
+    without retrieved context).
     """
-    from agent_server.memory import get_checkpointer
-    from langgraph.prebuilt import create_react_agent
+    cfg = Config()
+    w = _get_w()
+    parts: list[str] = []
 
-    ac = build_agent_config()
-    llm, tools = _build_llm_and_tools()
-    saver = get_checkpointer()
-    return create_react_agent(llm, tools, prompt=ac["system_prompt"], checkpointer=saver)
+    try:
+        ix = w.vector_search_indexes.query_index(
+            index_name=cfg.issue_index_fqn,
+            query_text=query,
+            columns=["issue_id", "issue_type", "sim_name",
+                     "note_type_description", "composite_text"],
+            num_results=3,
+            query_type="HYBRID",
+        )
+        rows = (ix.result.data_array if ix.result else []) or []
+        if rows:
+            issues_md = []
+            for r in rows:
+                issues_md.append(
+                    f"- Issue #{r[0]} ({r[1]} on {r[2]}, note: {r[3]}):\n"
+                    f"  {(r[4] or '')[:500]}"
+                )
+            parts.append("## Similar past issues\n" + "\n".join(issues_md))
+    except Exception as e:
+        logger.warning("issue VS query failed: %s: %s", type(e).__name__, e)
+
+    try:
+        ix = w.vector_search_indexes.query_index(
+            index_name=cfg.manual_index_fqn,
+            query_text=query,
+            columns=["source_pdf", "page_first", "page_last", "chunk_to_retrieve"],
+            num_results=3,
+            query_type="HYBRID",
+        )
+        rows = (ix.result.data_array if ix.result else []) or []
+        if rows:
+            manuals_md = []
+            for r in rows:
+                src = r[0] or ""
+                fn = src.split("/")[-1] if src else "manual"
+                manuals_md.append(
+                    f"- {fn} p.{r[1]}-{r[2]}:\n"
+                    f"  {(r[3] or '')[:500]}"
+                )
+            parts.append("## Relevant manual excerpts\n" + "\n".join(manuals_md))
+    except Exception as e:
+        logger.warning("manual VS query failed: %s: %s", type(e).__name__, e)
+
+    if not parts:
+        return ""
+    return "\n\n---\n# Retrieved context\n" + "\n\n".join(parts) + "\n---\n"
 
 
 if _can_build():
@@ -97,6 +142,7 @@ if _can_build():
     from agent_server.utils import get_session_id
 
     def _to_langchain(items):
+        """Convert ResponsesAgentRequest.input items to LangChain message objects."""
         from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
         out = []
         for m in items:
@@ -110,61 +156,73 @@ if _can_build():
                 out.append(SystemMessage(content=content))
         return out
 
+    def _last_user_text(items) -> str:
+        """Return the content of the most recent user turn (empty if none)."""
+        for m in reversed(items):
+            role = m.role if hasattr(m, "role") else m.get("role")
+            if role == "user":
+                content = m.content if hasattr(m, "content") else m.get("content")
+                return content or ""
+        return ""
+
     @invoke()
     def invoke_handler(request: ResponsesAgentRequest) -> ResponsesAgentResponse:
-        """Synchronous chat handler.
+        """Retrieval-augmented single-turn synthesis."""
+        from langchain_core.messages import SystemMessage
 
-        Reads thread_id from custom_inputs, tags the MLflow trace with it,
-        runs the LangGraph ReAct agent, and returns the final assistant turn.
-        LangGraph's PostgresSaver persists the conversation state.
-        """
         thread_id = get_session_id(request) or "default"
         mlflow.update_current_trace(
             metadata={"mlflow.trace.session": thread_id},
         )
-        graph = _build_graph_for_thread(thread_id)
-        messages = _to_langchain(request.input)
-        result = graph.invoke(
-            {"messages": messages},
-            config={"configurable": {"thread_id": thread_id}},
-        )
-        final = result["messages"][-1]
-        from mlflow.types.responses import ResponsesAgentResponse  # local import for clarity
+
+        last_user = _last_user_text(request.input)
+        context_block = _retrieve_context(last_user) if last_user else ""
+        system_msg = SystemMessage(content=SYSTEM_PROMPT + context_block)
+
+        history = _to_langchain(request.input)
+        messages = [system_msg] + history
+
+        llm = _get_llm()
+        response = llm.invoke(messages)
+        text = response.content if hasattr(response, "content") else str(response)
+        if isinstance(text, list):
+            text = "".join(
+                p.get("text", "") if isinstance(p, dict) else str(p) for p in text
+            )
+
         return ResponsesAgentResponse(
             output=[{"type": "message", "id": "msg-final",
-                      "content": [{"type": "output_text", "text": str(final.content)}]}]
+                      "content": [{"type": "output_text", "text": str(text)}]}]
         )
 
     @stream()
     async def stream_handler(
         request: ResponsesAgentRequest,
     ) -> AsyncGenerator[ResponsesAgentStreamEvent, None]:
-        """Streaming handler -- registered for future use by the React UI.
+        """Streaming handler -- v1 React client doesn't consume it; kept for parity."""
+        from langchain_core.messages import SystemMessage
 
-        v1 React client doesn't consume the stream; we expose it so future
-        work can switch without redeploying the agent.
-        """
         thread_id = get_session_id(request) or "default"
         mlflow.update_current_trace(
             metadata={"mlflow.trace.session": thread_id},
         )
-        graph = _build_graph_for_thread(thread_id)
-        messages = _to_langchain(request.input)
+
+        last_user = _last_user_text(request.input)
+        context_block = _retrieve_context(last_user) if last_user else ""
+        system_msg = SystemMessage(content=SYSTEM_PROMPT + context_block)
+        messages = [system_msg] + _to_langchain(request.input)
+
+        llm = _get_llm()
         counter = 0
-        for event in graph.stream(
-            {"messages": messages},
-            config={"configurable": {"thread_id": thread_id}},
-            stream_mode="updates",
-        ):
-            for _, node_state in event.items():
-                for msg in node_state.get("messages", []) or []:
-                    if getattr(msg, "content", None):
-                        counter += 1
-                        yield ResponsesAgentStreamEvent(
-                            type="response.output_item.done",
-                            item={
-                                "type": "message",
-                                "id": f"msg-{counter}",
-                                "content": [{"type": "output_text", "text": str(msg.content)}],
-                            },
-                        )
+        for chunk in llm.stream(messages):
+            text = chunk.content if hasattr(chunk, "content") else str(chunk)
+            if text:
+                counter += 1
+                yield ResponsesAgentStreamEvent(
+                    type="response.output_item.done",
+                    item={
+                        "type": "message",
+                        "id": f"msg-{counter}",
+                        "content": [{"type": "output_text", "text": str(text)}],
+                    },
+                )
