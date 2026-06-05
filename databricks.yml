@@ -18,7 +18,7 @@ variables:
 resources:
   experiments:
     fsisim_experiment:
-      name: fsisim-experiment
+      name: /Users/${workspace.current_user.userName}/fsisim-experiment
 
   apps:
     fsisim_scaffold:
