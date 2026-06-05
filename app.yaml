@@ -8,8 +8,8 @@ env:
   - name: MLFLOW_EXPERIMENT_ID
     valueFrom: "experiment"
   - name: LAKEBASE_INSTANCE_NAME
-    value: "fsisim-poc"
+    value: "flightsafety-lakebase"
   - name: LAKEBASE_DATABASE_NAME
-    value: "fsisim_chat"
+    value: "databricks_postgres"
   - name: LAKEBASE_AGENT_MEMORY_SCHEMA
     value: "agent_server"

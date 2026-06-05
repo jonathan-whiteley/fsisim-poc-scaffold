@@ -7,9 +7,9 @@ variables:
   schema:
     default: fsisim_issue_ai_gold
   lakebase_instance_name:
-    default: fsisim-poc
+    default: flightsafety-lakebase
   lakebase_database_name:
-    default: fsisim_chat
+    default: databricks_postgres
   eval_personas_file:
     default: agent_server.personas
   agent_app_name:
