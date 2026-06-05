@@ -13,7 +13,7 @@ variables:
   eval_personas_file:
     default: agent_server.personas
   agent_app_name:
-    default: fsisim-scaffold
+    default: fsisim-scaffold-dab
 
 resources:
   experiments:
