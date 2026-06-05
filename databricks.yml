@@ -1,0 +1,82 @@
+bundle:
+  name: fsisim_poc_scaffold
+
+variables:
+  catalog:
+    default: jdub_demo
+  schema:
+    default: fsisim_issue_ai_gold
+  lakebase_instance_name:
+    default: fsisim-poc
+  lakebase_database_name:
+    default: fsisim_chat
+  eval_personas_file:
+    default: agent_server.personas
+  agent_app_name:
+    default: fsisim-scaffold
+
+resources:
+  experiments:
+    fsisim_experiment:
+      name: fsisim-experiment
+      artifact_location: dbfs:/Users/jonathan.whiteley@databricks.com/.mlflow/fsisim_experiment
+
+  apps:
+    fsisim_scaffold:
+      name: ${var.agent_app_name}
+      description: FSISIM Issue Resolution Agent (synthetic data; Agents as Apps)
+      source_code_path: ./
+      config:
+        command: ["uv", "run", "start-app"]
+        env:
+          - name: MLFLOW_TRACKING_URI
+            value: "databricks"
+          - name: MLFLOW_REGISTRY_URI
+            value: "databricks-uc"
+          - name: MLFLOW_EXPERIMENT_ID
+            value_from: "experiment"
+          - name: LAKEBASE_INSTANCE_NAME
+            value: ${var.lakebase_instance_name}
+          - name: LAKEBASE_DATABASE_NAME
+            value: ${var.lakebase_database_name}
+          - name: LAKEBASE_AGENT_MEMORY_SCHEMA
+            value: "agent_server"
+          - name: FSISIM_CATALOG
+            value: ${var.catalog}
+          - name: FSISIM_SCHEMA
+            value: ${var.schema}
+      resources:
+        - name: experiment
+          experiment:
+            experiment_id: ${resources.experiments.fsisim_experiment.id}
+            permission: CAN_MANAGE
+
+  jobs:
+    fsisim_eval:
+      name: fsisim-eval
+      schedule:
+        quartz_cron_expression: "0 0 7 ? * MON"
+        timezone_id: UTC
+      tasks:
+        - task_key: evaluate
+          job_cluster_key: eval_cluster
+          spark_python_task:
+            python_file: scripts/run_eval.py
+            parameters:
+              - "--personas-file"
+              - ${var.eval_personas_file}
+      job_clusters:
+        - job_cluster_key: eval_cluster
+          new_cluster:
+            spark_version: "14.3.x-scala2.12"
+            node_type_id: "i3.xlarge"
+            num_workers: 2
+            aws_attributes:
+              zone_id: "us-west-2a"
+
+targets:
+  dev:
+    mode: development
+    default: true
+  prod:
+    mode: production
