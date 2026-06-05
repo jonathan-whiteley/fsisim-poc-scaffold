@@ -4,10 +4,12 @@ import ThumbUpAltOutlinedIcon from "@mui/icons-material/ThumbUpAltOutlined";
 import ThumbUpAltIcon from "@mui/icons-material/ThumbUpAlt";
 import ThumbDownAltOutlinedIcon from "@mui/icons-material/ThumbDownAltOutlined";
 import ThumbDownAltIcon from "@mui/icons-material/ThumbDownAlt";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { postFeedback } from "../api/chat";
 import type { Citation } from "./CitationPill";
 import CitationPill from "./CitationPill";
-import { FS_NAVY, FS_BORDER, FS_MUTED } from "../theme";
+import { FS_NAVY, FS_BORDER, FS_MUTED, FS_SKY } from "../theme";
 
 interface Props {
   role: "user" | "assistant";
@@ -70,10 +72,62 @@ export default function MessageBubble({
           py: 1.25,
           borderRadius: 2,
           fontSize: 14,
-          whiteSpace: "pre-wrap",
+          lineHeight: 1.55,
+          "& p": { my: 0.75 },
+          "& p:first-of-type": { mt: 0 },
+          "& p:last-of-type": { mb: 0 },
+          "& strong": { fontWeight: 700 },
+          "& em": { fontStyle: "italic" },
+          "& ul, & ol": { pl: 3, my: 0.75 },
+          "& li": { my: 0.25 },
+          "& code": {
+            bgcolor: "#F4F5F8",
+            px: 0.5,
+            py: 0.125,
+            borderRadius: 0.5,
+            fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+            fontSize: 13,
+          },
+          "& pre": {
+            bgcolor: "#F4F5F8",
+            p: 1.25,
+            borderRadius: 1,
+            overflowX: "auto",
+            my: 1,
+            "& code": { bgcolor: "transparent", p: 0 },
+          },
+          "& h1, & h2, & h3, & h4": {
+            fontWeight: 700,
+            mt: 1.25,
+            mb: 0.5,
+            "&:first-of-type": { mt: 0 },
+          },
+          "& h1": { fontSize: 18 },
+          "& h2": { fontSize: 16 },
+          "& h3, & h4": { fontSize: 15 },
+          "& blockquote": {
+            borderLeft: `3px solid ${FS_SKY}`,
+            pl: 1.5,
+            ml: 0,
+            my: 0.75,
+            color: FS_MUTED,
+          },
+          "& a": { color: FS_SKY, textDecoration: "underline" },
+          "& table": {
+            borderCollapse: "collapse",
+            my: 1,
+            fontSize: 13,
+          },
+          "& th, & td": {
+            border: `1px solid ${FS_BORDER}`,
+            px: 1,
+            py: 0.5,
+            textAlign: "left",
+          },
+          "& th": { bgcolor: "#FAFBFC", fontWeight: 600 },
         }}
       >
-        {text}
+        <ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>
       </Box>
       {citations && citations.length > 0 && (
         <Box sx={{ mt: 0.75, display: "flex", flexWrap: "wrap" }}>
