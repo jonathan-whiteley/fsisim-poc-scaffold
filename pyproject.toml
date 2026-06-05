@@ -6,6 +6,7 @@ dependencies = [
   "databricks-sdk>=0.30.0",
   "databricks-vectorsearch>=0.40",
   "databricks-agents>=1.0.0",
+  "databricks-connect>=15.0.0",
   "databricks-langchain>=0.19.0",
   "langgraph>=1.2.0",
   "langgraph-checkpoint-postgres>=2.0.0",
