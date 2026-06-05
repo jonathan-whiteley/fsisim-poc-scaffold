@@ -63,15 +63,25 @@ def _get_w():
 
 def _call_llm(messages: list[dict]) -> str:
     """Call the LLM serving endpoint directly via SDK; returns the assistant text."""
+    from databricks.sdk.service.serving import ChatMessage, ChatMessageRole
+
     cfg = Config()
     w = _get_w()
-    resp = w.serving_endpoints.query(
-        name=cfg.llm_endpoint,
-        messages=[{"role": m["role"], "content": m["content"]} for m in messages],
-    )
+
+    role_map = {
+        "system": ChatMessageRole.SYSTEM,
+        "user": ChatMessageRole.USER,
+        "assistant": ChatMessageRole.ASSISTANT,
+    }
+    chat_messages = [
+        ChatMessage(role=role_map.get(m["role"], ChatMessageRole.USER), content=m["content"])
+        for m in messages
+    ]
+
+    resp = w.serving_endpoints.query(name=cfg.llm_endpoint, messages=chat_messages)
     if resp.choices and len(resp.choices) > 0:
         msg = resp.choices[0].message
-        content = msg.content if hasattr(msg, "content") else msg.get("content", "")
+        content = msg.content if hasattr(msg, "content") else None
         return content or ""
     return ""
 
