@@ -286,16 +286,26 @@ class FeedbackRequest(BaseModel):
 
 
 def _lookup_trace_id(message_id: str) -> str | None:
+    """Look up the MLflow trace_id for an assistant message.
+
+    Returns None if the messages table doesn't exist yet (AgentServer
+    populates it via /invocations; we currently call @invoke directly so
+    nothing fills this table). Feedback still gets stored in Lakebase
+    via _upsert_feedback; we just skip the MLflow assessment link.
+    """
     import psycopg
     from agent_server.memory import get_pg_connection_string
-    with psycopg.connect(get_pg_connection_string(), autocommit=True) as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "SELECT mlflow_trace_id FROM agent_server.messages WHERE id = %s",
-                (message_id,),
-            )
-            row = cur.fetchone()
-    return row[0] if row else None
+    try:
+        with psycopg.connect(get_pg_connection_string(), autocommit=True) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT mlflow_trace_id FROM agent_server.messages WHERE id = %s",
+                    (message_id,),
+                )
+                row = cur.fetchone()
+        return row[0] if row else None
+    except psycopg.errors.UndefinedTable:
+        return None
 
 
 def _upsert_feedback(message_id: str, rating: str, comment: str | None,
