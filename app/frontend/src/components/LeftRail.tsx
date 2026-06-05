@@ -93,14 +93,20 @@ export default function LeftRail({ currentThreadId, onSelectThread, refreshTrigg
             >
               <ListItemText
                 primary={t.title}
-                primaryTypographyProps={{
-                  fontSize: 13,
-                  noWrap: true,
-                  color: FS_NAVY,
-                  fontWeight: t.thread_id === currentThreadId ? 600 : 400,
-                }}
                 secondary={new Date(t.updated_at).toLocaleDateString()}
-                secondaryTypographyProps={{ fontSize: 10, color: FS_MUTED }}
+                slotProps={{
+                  primary: {
+                    sx: {
+                      fontSize: 13,
+                      color: FS_NAVY,
+                      fontWeight: t.thread_id === currentThreadId ? 600 : 400,
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    },
+                  },
+                  secondary: { sx: { fontSize: 10, color: FS_MUTED } },
+                }}
               />
             </ListItemButton>
           ))}

@@ -1,7 +1,9 @@
+import { useState } from "react";
 import { Box, AppBar, Toolbar, Avatar, Stack, Typography } from "@mui/material";
 import FlightTakeoffIcon from "@mui/icons-material/FlightTakeoff";
 import { FS_NAVY, FS_SKY } from "./theme";
 import ChatThread from "./components/ChatThread";
+import LeftRail from "./components/LeftRail";
 
 export const EXAMPLES = [
   "G001-SIM-01 hydraulic pressure drop on takeoff. Anything similar?",
@@ -12,6 +14,14 @@ export const EXAMPLES = [
 ];
 
 export default function App() {
+  const [threadId, setThreadId] = useState<string | null>(null);
+  const [refreshTrigger, setRefreshTrigger] = useState(0);
+
+  const onThreadChange = (newId: string) => {
+    setThreadId(newId);
+    setRefreshTrigger((n) => n + 1);
+  };
+
   return (
     <Box sx={{ display: "flex", flexDirection: "column", height: "100vh", bgcolor: "background.default" }}>
       <AppBar
@@ -29,22 +39,13 @@ export default function App() {
               component="img"
               src="/fsi-logo.svg"
               alt="FlightSafety"
-              sx={{
-                height: 28,
-                filter: "brightness(0) invert(1)",
-                opacity: 0.96,
-              }}
+              sx={{ height: 28, filter: "brightness(0) invert(1)", opacity: 0.96 }}
             />
             <Box sx={{ width: "1px", height: 22, bgcolor: "rgba(255,255,255,0.18)", mx: 1.5, flexShrink: 0 }} />
             <Stack direction="row" sx={{ alignItems: "center", gap: 1 }}>
               <FlightTakeoffIcon sx={{ color: FS_SKY, fontSize: 18 }} />
               <Typography
-                sx={{
-                  color: "rgba(255,255,255,0.95)",
-                  fontWeight: 600,
-                  fontSize: 14,
-                  letterSpacing: "-0.005em",
-                }}
+                sx={{ color: "rgba(255,255,255,0.95)", fontWeight: 600, fontSize: 14, letterSpacing: "-0.005em" }}
               >
                 FSISIM Issue Resolution Agent
               </Typography>
@@ -69,8 +70,13 @@ export default function App() {
       </AppBar>
 
       <Box sx={{ display: "flex", flex: 1, overflow: "hidden" }}>
+        <LeftRail
+          currentThreadId={threadId}
+          onSelectThread={setThreadId}
+          refreshTrigger={refreshTrigger}
+        />
         <Box sx={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", position: "relative" }}>
-          <ChatThread examples={EXAMPLES} />
+          <ChatThread examples={EXAMPLES} threadId={threadId} onThreadChange={onThreadChange} />
         </Box>
       </Box>
     </Box>
