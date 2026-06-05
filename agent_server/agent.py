@@ -12,14 +12,9 @@ import logging
 from typing import Any, AsyncGenerator
 
 from config import Config
+from agent_server.prompts import SYSTEM_PROMPT
 
 logger = logging.getLogger(__name__)
-
-try:
-    from agent_server.prompts import SYSTEM_PROMPT
-except ModuleNotFoundError:
-    # Fallback: load from the legacy agent/ path during migration
-    from agent.prompts import SYSTEM_PROMPT  # type: ignore
 
 
 def build_agent_config() -> dict[str, Any]:

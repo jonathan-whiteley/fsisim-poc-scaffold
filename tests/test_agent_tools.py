@@ -1,4 +1,4 @@
-from agent.agent import build_agent_config
+from agent_server.agent import build_agent_config
 
 
 def test_agent_config_lists_both_tools():
