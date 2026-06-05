@@ -16,7 +16,7 @@ from config import Config
 try:
     from agent.prompts import SYSTEM_PROMPT
 except ModuleNotFoundError:
-    from prompts import SYSTEM_PROMPT
+    from agent_server.prompts import SYSTEM_PROMPT
 
 
 def build_agent_config() -> dict[str, Any]:
