@@ -126,3 +126,48 @@ def test_chat_mints_thread_id_when_missing(client):
     assert r.status_code == 200
     body = r.json()
     assert body["thread_id"]  # non-empty
+
+
+def test_feedback_requires_email(client):
+    r = client.post("/api/feedback", json={"message_id": "m1", "rating": "up"})
+    assert r.status_code == 401
+
+
+def test_feedback_writes_to_mlflow_and_lakebase(client):
+    """POST /api/feedback logs feedback to MLflow trace + upserts Lakebase row."""
+    with patch("agent_server.routes._lookup_trace_id", return_value="tr-99") as lookup, \
+         patch("agent_server.routes._upsert_feedback") as upsert, \
+         patch("agent_server.routes._log_mlflow_feedback") as mflog:
+        r = client.post(
+            "/api/feedback",
+            headers={"X-Forwarded-Email": "tech@flightsafety.com"},
+            json={"message_id": "m1", "rating": "up", "comment": "great"},
+        )
+    assert r.status_code == 200
+    lookup.assert_called_once_with("m1")
+    upsert.assert_called_once()
+    mflog.assert_called_once_with("tr-99", "up", "great")
+
+
+def test_feedback_rating_must_be_up_or_down(client):
+    r = client.post(
+        "/api/feedback",
+        headers={"X-Forwarded-Email": "tech@flightsafety.com"},
+        json={"message_id": "m1", "rating": "sideways"},
+    )
+    assert r.status_code == 422  # pydantic validation
+
+
+def test_feedback_returns_200_even_if_mlflow_fails(client):
+    """MLflow log_feedback failure must NOT fail the request; Lakebase mirror is enough."""
+    with patch("agent_server.routes._lookup_trace_id", return_value="tr-99"), \
+         patch("agent_server.routes._upsert_feedback") as upsert, \
+         patch("agent_server.routes._log_mlflow_feedback",
+               side_effect=RuntimeError("MLflow unreachable")):
+        r = client.post(
+            "/api/feedback",
+            headers={"X-Forwarded-Email": "tech@flightsafety.com"},
+            json={"message_id": "m1", "rating": "down"},
+        )
+    assert r.status_code == 200
+    upsert.assert_called_once()

@@ -276,6 +276,81 @@ def _reissue_citations(user_message: str) -> dict:
     return {"manual_citations": manual_citations, "issue_citations": issue_citations}
 
 
+from typing import Literal
+
+
+class FeedbackRequest(BaseModel):
+    message_id: str
+    rating: Literal["up", "down"]
+    comment: str | None = None
+
+
+def _lookup_trace_id(message_id: str) -> str | None:
+    import psycopg
+    from agent_server.memory import get_pg_connection_string
+    with psycopg.connect(get_pg_connection_string(), autocommit=True) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT mlflow_trace_id FROM agent_server.messages WHERE id = %s",
+                (message_id,),
+            )
+            row = cur.fetchone()
+    return row[0] if row else None
+
+
+def _upsert_feedback(message_id: str, rating: str, comment: str | None,
+                     user_email: str, trace_id: str | None) -> None:
+    import psycopg
+    from agent_server.memory import get_pg_connection_string
+    sql = """
+        INSERT INTO agent_server.message_feedback
+          (message_id, rating, comment, user_email, mlflow_trace_id, updated_at)
+        VALUES (%s, %s, %s, %s, %s, now())
+        ON CONFLICT (message_id) DO UPDATE SET
+          rating = EXCLUDED.rating,
+          comment = EXCLUDED.comment,
+          mlflow_trace_id = EXCLUDED.mlflow_trace_id,
+          updated_at = now()
+    """
+    with psycopg.connect(get_pg_connection_string(), autocommit=True) as conn:
+        with conn.cursor() as cur:
+            cur.execute(sql, (message_id, rating, comment, user_email, trace_id))
+
+
+def _log_mlflow_feedback(trace_id: str, rating: str, comment: str | None) -> None:
+    import mlflow
+    # mlflow.log_feedback writes an Assessment to the trace.
+    mlflow.log_feedback(
+        trace_id=trace_id,
+        name="thumbs",
+        value=rating,
+        rationale=comment,
+    )
+
+
+@router.post("/api/feedback")
+async def feedback(req: FeedbackRequest, request: Request):
+    email = get_user_email(request)
+    if not email:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    trace_id = _lookup_trace_id(req.message_id)
+    _upsert_feedback(req.message_id, req.rating, req.comment, email, trace_id)
+
+    if trace_id:
+        try:
+            _log_mlflow_feedback(trace_id, req.rating, req.comment)
+        except Exception:
+            # Lakebase mirror is enough for app-side render; log + continue.
+            import logging
+            logging.getLogger(__name__).warning(
+                "mlflow.log_feedback failed for message_id=%s", req.message_id,
+                exc_info=True,
+            )
+
+    return {"ok": True, "message_id": req.message_id, "rating": req.rating}
+
+
 @router.post("/api/chat")
 async def chat(req: ChatRequest, request: Request):
     email = get_user_email(request)
