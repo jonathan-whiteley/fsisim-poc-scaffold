@@ -74,3 +74,55 @@ def test_thread_detail_rejects_other_user(client):
             headers={"X-Forwarded-Email": "tech@flightsafety.com"},
         )
     assert r.status_code == 403
+
+
+def test_chat_requires_email_header(client):
+    r = client.post("/api/chat", json={"content": "hello"})
+    assert r.status_code == 401
+
+
+def test_chat_invokes_agent_and_returns_text(client):
+    """POST /api/chat passes thread_id + user to the agent and returns text + ids."""
+    from mlflow.types.responses import ResponsesAgentResponse
+
+    fake_response = ResponsesAgentResponse(
+        output=[{"type": "message", "id": "assistant-msg-1",
+                  "content": [{"type": "output_text", "text": "Resolved."}]}],
+    )
+
+    with patch("agent_server.routes._call_invoke", return_value=fake_response) as m:
+        with patch("agent_server.routes._reissue_citations",
+                   return_value={"manual_citations": [], "issue_citations": []}):
+            r = client.post(
+                "/api/chat",
+                headers={"X-Forwarded-Email": "tech@flightsafety.com"},
+                json={"thread_id": "abc-123", "content": "hydraulic drop?"},
+            )
+
+    assert r.status_code == 200
+    body = r.json()
+    assert body["text"] == "Resolved."
+    assert body["thread_id"] == "abc-123"
+    assert "assistant_message_id" in body
+    # The handler must have passed thread_id through custom_inputs:
+    request_arg = m.call_args[0][0]
+    assert request_arg.custom_inputs["thread_id"] == "abc-123"
+
+
+def test_chat_mints_thread_id_when_missing(client):
+    from mlflow.types.responses import ResponsesAgentResponse
+    fake = ResponsesAgentResponse(
+        output=[{"type": "message", "id": "x",
+                  "content": [{"type": "output_text", "text": "ok"}]}],
+    )
+    with patch("agent_server.routes._call_invoke", return_value=fake):
+        with patch("agent_server.routes._reissue_citations",
+                   return_value={"manual_citations": [], "issue_citations": []}):
+            r = client.post(
+                "/api/chat",
+                headers={"X-Forwarded-Email": "tech@flightsafety.com"},
+                json={"content": "hello"},
+            )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["thread_id"]  # non-empty

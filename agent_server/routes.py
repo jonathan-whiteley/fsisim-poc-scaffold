@@ -200,3 +200,118 @@ async def get_thread(thread_id: str, request: Request):
     if owner != email:
         raise HTTPException(status_code=403, detail="Not your thread")
     return {"thread_id": thread_id, "messages": _fetch_thread_messages(thread_id)}
+
+
+import uuid
+
+from pydantic import BaseModel
+from mlflow.types.responses import ResponsesAgentRequest
+
+
+class ChatRequest(BaseModel):
+    content: str
+    thread_id: str | None = None
+
+
+def _call_invoke(req: ResponsesAgentRequest):
+    """Indirection so tests can mock the in-process @invoke call."""
+    from mlflow.genai.agent_server import get_invoke_function
+    fn = get_invoke_function()
+    if fn is None:
+        raise RuntimeError("@invoke handler not registered (agent_server.agent not imported)")
+    return fn(req)
+
+
+def _reissue_citations(user_message: str) -> dict:
+    """Re-query VS indexes for manual + issue citations (existing logic).
+
+    Lives in routes.py so the chat response can be assembled in one place.
+    Returns {"manual_citations": [...], "issue_citations": [...]}.
+    """
+    w = _get_w()
+
+    cat = os.environ.get("FSISIM_CATALOG", CATALOG)
+    schm = os.environ.get("FSISIM_SCHEMA", SCHEMA)
+    manual_idx = f"{cat}.{schm}.manual_knowledge_index"
+    issue_idx = f"{cat}.{schm}.issue_history_index"
+
+    manual_citations: list[dict] = []
+    try:
+        ix = w.vector_search_indexes.query_index(
+            index_name=manual_idx, query_text=user_message,
+            columns=["source_pdf", "page_first", "page_last", "chunk_to_retrieve"],
+            num_results=3, query_type="HYBRID",
+        )
+        for r in (ix.result.data_array if ix.result else []) or []:
+            source_pdf = r[0] or ""
+            filename = source_pdf.split("/")[-1] if source_pdf else ""
+            title = filename.replace(".pdf", "").replace("_", " ").title()
+            manual_citations.append({
+                "source_pdf": source_pdf, "filename": filename, "title": title,
+                "page_first": int(r[1] or 0), "page_last": int(r[2] or 0),
+                "preview": (r[3] or "")[:600],
+            })
+    except Exception:
+        pass
+
+    issue_citations: list[dict] = []
+    try:
+        ix = w.vector_search_indexes.query_index(
+            index_name=issue_idx, query_text=user_message,
+            columns=["issue_id", "issue_type", "sim_name",
+                     "note_type_description", "composite_text"],
+            num_results=3, query_type="HYBRID",
+        )
+        for r in (ix.result.data_array if ix.result else []) or []:
+            issue_citations.append({
+                "issue_id": int(r[0] or 0),
+                "issue_type": r[1] or "",
+                "sim_name": r[2] or "",
+                "note_type": r[3] or "",
+                "preview": (r[4] or "")[:600],
+            })
+    except Exception:
+        pass
+
+    return {"manual_citations": manual_citations, "issue_citations": issue_citations}
+
+
+@router.post("/api/chat")
+async def chat(req: ChatRequest, request: Request):
+    email = get_user_email(request)
+    if not email:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    thread_id = req.thread_id or str(uuid.uuid4())
+
+    agent_req = ResponsesAgentRequest(
+        input=[{"role": "user", "content": req.content}],
+        custom_inputs={"thread_id": thread_id, "user_email": email},
+    )
+
+    response = _call_invoke(agent_req)
+
+    text = ""
+    assistant_message_id = ""
+    for item in response.output:
+        if isinstance(item, dict):
+            content = item.get("content", [])
+            assistant_message_id = item.get("id", assistant_message_id)
+        else:
+            content = getattr(item, "content", [])
+            assistant_message_id = getattr(item, "id", assistant_message_id)
+        for part in content:
+            ptype = part.get("type") if isinstance(part, dict) else getattr(part, "type", None)
+            ptext = part.get("text") if isinstance(part, dict) else getattr(part, "text", None)
+            if ptype in ("output_text", "text") and ptext:
+                text += ptext
+
+    citations = _reissue_citations(req.content)
+
+    return {
+        "thread_id": thread_id,
+        "text": text or "(no response)",
+        "manual_citations": citations["manual_citations"],
+        "issue_citations": citations["issue_citations"],
+        "assistant_message_id": assistant_message_id,
+    }
