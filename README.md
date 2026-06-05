@@ -46,55 +46,42 @@ pytest -q
 # 2. Authenticate to your Databricks workspace
 databricks auth login --host https://<your-workspace>.cloud.databricks.com
 
-# 3. Provision UC (catalog, schema, volume)
+# 3. Provision UC (catalog, schema, volume) — one-time
 python -m infra.setup_catalog
 
-# 4. Generate issue data (~6 min, calls Sonnet 1.5K times via FM API)
+# 4-8. Generate data + indexes (unchanged)
 python -m data_gen.write_issues
-
-# 5. Generate manual PDFs (~6 docs, ~1 min) and upload to volume
 python -m data_gen.gen_manuals
-for f in generated_manuals/*.pdf; do
-  databricks fs cp "$f" "dbfs:/Volumes/${FSISIM_CATALOG:-your_catalog}/fsisim_issue_ai_gold/manuals/$(basename $f)" --overwrite
-done
-
-# 6. Parse and chunk manuals (requires ai_prep_search Beta enabled)
 python -m data_gen.parse_chunk_manuals
-
-# 7. Vector Search endpoint and both indexes (re-run after step 6 to add manual index)
 python -m infra.setup_vector_search
+# Apply UC function tools via tools.sql (Databricks SQL)
 
-# 8. UC function tools
-python -c "from agent.tools import apply; apply()"   # if you wired tools.sql to a Python helper
-# OR use the SQL file directly via databricks sql query.
+# 9. Provision a Lakebase instance (one-time, outside DAB)
+#    via the workspace UI or the FEVM CLI; record its name.
+#    Default in databricks.yml: fsisim-poc
 
-# 9. Deploy the agent as a serving endpoint
-python -m agent.deploy_agent
-
-# 10. Build the frontend locally
+# 10. Build the React frontend
 cd app/frontend && npm install && npm run build && cd ../..
 
-# 11. Create the Databricks App (first time only)
-databricks apps create fsisim-scaffold
+# 11. Deploy the bundle (creates app, experiment, eval job)
+databricks bundle validate
+databricks bundle deploy --target dev
 
-# 12. Sync source to the workspace. app/.databricksignore excludes
-#     node_modules, frontend/src, package.json, etc., so only backend/,
-#     app.yaml, requirements.txt, and frontend/dist/ end up in the
-#     workspace path.
-databricks sync ./app /Workspace/Users/<your-email>/fsisim-scaffold --watch=false
+# 12. After first deploy: grant Lakebase permissions + create custom schema
+APP_SP=$(databricks apps get fsisim-scaffold --output json | jq -r '.service_principal_client_id')
+uv run python scripts/grant_lakebase_permissions.py "$APP_SP" \
+  --memory-type langgraph --instance-name fsisim-poc
+uv run python -m scripts.init_lakebase_schema
 
-# 13. Push the built frontend dist/ directly (databricks sync respects the root
-#     .gitignore which excludes dist/, so it must be uploaded out-of-band)
-databricks workspace delete \
-  /Workspace/Users/<your-email>/fsisim-scaffold/frontend/dist --recursive 2>/dev/null
-databricks workspace import-dir \
-  ./app/frontend/dist \
-  /Workspace/Users/<your-email>/fsisim-scaffold/frontend/dist \
-  --overwrite
+# 13. Smoke
+uv run python -m scripts.smoke --app-url https://<app-host>
+```
 
-# 14. Deploy
-databricks apps deploy fsisim-scaffold \
-  --source-code-path /Workspace/Users/<your-email>/fsisim-scaffold
+Per-deploy after the first:
+
+```bash
+cd app/frontend && npm run build && cd ../..
+databricks bundle deploy --target dev
 ```
 
 ## Forking for production
