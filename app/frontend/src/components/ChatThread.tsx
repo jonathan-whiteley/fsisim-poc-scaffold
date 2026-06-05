@@ -28,11 +28,19 @@ export default function ChatThread({ examples, threadId, onThreadChange }: Props
   const [busy, setBusy] = useState(false);
   const [slideOver, setSlideOver] = useState<Citation | null>(null);
   const endRef = useRef<HTMLDivElement | null>(null);
+  // Threads minted locally by send() so we can suppress the history fetch
+  // (history doesn't carry citations; reloading would wipe what we just got).
+  const locallyCreatedThreads = useRef<Set<string>>(new Set());
 
   // Load history when the parent switches threads.
   useEffect(() => {
     if (!threadId) {
       setMessages([]);
+      return;
+    }
+    if (locallyCreatedThreads.current.has(threadId)) {
+      // We just created this thread via send(); state already has the full
+      // response (with citations). Don't refetch.
       return;
     }
     let cancelled = false;
@@ -72,6 +80,7 @@ export default function ChatThread({ examples, threadId, onThreadChange }: Props
     const resp = await sendChat(content, threadId ?? undefined);
 
     if (!threadId && resp.thread_id) {
+      locallyCreatedThreads.current.add(resp.thread_id);
       onThreadChange(resp.thread_id);
     }
 
