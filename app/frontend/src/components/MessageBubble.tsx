@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Box, IconButton, Typography } from "@mui/material";
+import { Box, IconButton, Typography, useTheme } from "@mui/material";
 import ThumbUpAltOutlinedIcon from "@mui/icons-material/ThumbUpAltOutlined";
 import ThumbUpAltIcon from "@mui/icons-material/ThumbUpAlt";
 import ThumbDownAltOutlinedIcon from "@mui/icons-material/ThumbDownAltOutlined";
@@ -9,7 +9,7 @@ import remarkGfm from "remark-gfm";
 import { postFeedback } from "../api/chat";
 import type { Citation } from "./CitationPill";
 import CitationPill from "./CitationPill";
-import { FS_NAVY, FS_BORDER, FS_MUTED, FS_SKY } from "../theme";
+import { FS_NAVY, FS_SKY } from "../theme";
 
 interface Props {
   role: "user" | "assistant";
@@ -28,8 +28,10 @@ export default function MessageBubble({
   initialRating = null,
   onCitationClick,
 }: Props) {
+  const theme = useTheme();
   const [rating, setRating] = useState<"up" | "down" | null>(initialRating);
   const [submitting, setSubmitting] = useState(false);
+  const codeBg = theme.palette.mode === "dark" ? "rgba(255,255,255,0.06)" : "#F4F5F8";
 
   const submit = async (next: "up" | "down") => {
     if (!assistantMessageId || submitting) return;
@@ -65,9 +67,9 @@ export default function MessageBubble({
     <Box sx={{ alignSelf: "flex-start", maxWidth: "92%", my: 0.5 }}>
       <Box
         sx={{
-          bgcolor: "#FFFFFF",
-          color: FS_NAVY,
-          border: `1px solid ${FS_BORDER}`,
+          bgcolor: theme.palette.background.paper,
+          color: theme.palette.text.primary,
+          border: `1px solid ${theme.palette.divider}`,
           px: 2,
           py: 1.25,
           borderRadius: 2,
@@ -81,7 +83,7 @@ export default function MessageBubble({
           "& ul, & ol": { pl: 3, my: 0.75 },
           "& li": { my: 0.25 },
           "& code": {
-            bgcolor: "#F4F5F8",
+            bgcolor: codeBg,
             px: 0.5,
             py: 0.125,
             borderRadius: 0.5,
@@ -89,7 +91,7 @@ export default function MessageBubble({
             fontSize: 13,
           },
           "& pre": {
-            bgcolor: "#F4F5F8",
+            bgcolor: codeBg,
             p: 1.25,
             borderRadius: 1,
             overflowX: "auto",
@@ -110,7 +112,7 @@ export default function MessageBubble({
             pl: 1.5,
             ml: 0,
             my: 0.75,
-            color: FS_MUTED,
+            color: theme.palette.text.secondary,
           },
           "& a": { color: FS_SKY, textDecoration: "underline" },
           "& table": {
@@ -119,12 +121,12 @@ export default function MessageBubble({
             fontSize: 13,
           },
           "& th, & td": {
-            border: `1px solid ${FS_BORDER}`,
+            border: `1px solid ${theme.palette.divider}`,
             px: 1,
             py: 0.5,
             textAlign: "left",
           },
-          "& th": { bgcolor: "#FAFBFC", fontWeight: 600 },
+          "& th": { bgcolor: codeBg, fontWeight: 600 },
         }}
       >
         <ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>
@@ -142,7 +144,10 @@ export default function MessageBubble({
             size="small"
             onClick={() => submit("up")}
             disabled={submitting}
-            sx={{ color: rating === "up" ? FS_NAVY : FS_MUTED, padding: 0.25 }}
+            sx={{
+              color: rating === "up" ? theme.palette.text.primary : theme.palette.text.secondary,
+              padding: 0.25,
+            }}
             aria-label="thumbs up"
           >
             {rating === "up" ? <ThumbUpAltIcon fontSize="inherit" /> : <ThumbUpAltOutlinedIcon fontSize="inherit" />}
@@ -151,12 +156,15 @@ export default function MessageBubble({
             size="small"
             onClick={() => submit("down")}
             disabled={submitting}
-            sx={{ color: rating === "down" ? FS_NAVY : FS_MUTED, padding: 0.25 }}
+            sx={{
+              color: rating === "down" ? theme.palette.text.primary : theme.palette.text.secondary,
+              padding: 0.25,
+            }}
             aria-label="thumbs down"
           >
             {rating === "down" ? <ThumbDownAltIcon fontSize="inherit" /> : <ThumbDownAltOutlinedIcon fontSize="inherit" />}
           </IconButton>
-          <Typography sx={{ fontSize: 10, color: FS_MUTED, ml: 1 }}>
+          <Typography sx={{ fontSize: 10, color: theme.palette.text.secondary, ml: 1 }}>
             {rating ? "Thanks for the feedback" : "Was this helpful?"}
           </Typography>
         </Box>
