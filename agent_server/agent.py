@@ -166,6 +166,26 @@ def _last_user_text(items) -> str:
     return ""
 
 
+import re as _re
+
+_TOOL_CALL_PATTERNS = [
+    # XML-style tool tags like <search_past_issues>...</search_past_issues>
+    _re.compile(r"<\s*search_(?:past_issues|technical_manuals)\b[^>]*>.*?</\s*search_[^>]+>",
+                _re.DOTALL | _re.IGNORECASE),
+    # Fence ```tool_code ... ```
+    _re.compile(r"```tool_code\b.*?```", _re.DOTALL),
+    # Bare opener (sometimes the model emits only the open tag)
+    _re.compile(r"<\s*search_(?:past_issues|technical_manuals)\b[^>]*>\s*", _re.IGNORECASE),
+]
+
+
+def _strip_tool_call_leak(text: str) -> str:
+    """Belt-and-suspenders: scrub any tool-call XML/fence the LLM leaks despite the prompt."""
+    for pat in _TOOL_CALL_PATTERNS:
+        text = pat.sub("", text)
+    return text.strip()
+
+
 @invoke()
 def invoke_handler(request: ResponsesAgentRequest) -> ResponsesAgentResponse:
     """Retrieval-augmented single-turn synthesis."""
@@ -181,11 +201,11 @@ def invoke_handler(request: ResponsesAgentRequest) -> ResponsesAgentResponse:
     messages = [{"role": "system", "content": SYSTEM_PROMPT + context_block}]
     messages.extend(_to_chat_dicts(request.input))
 
-    text = _call_llm(messages)
+    text = _strip_tool_call_leak(_call_llm(messages) or "")
 
     return ResponsesAgentResponse(
         output=[{"type": "message", "id": "msg-final",
-                  "content": [{"type": "output_text", "text": str(text or "(no response)")}]}]
+                  "content": [{"type": "output_text", "text": text or "(no response)"}]}]
     )
 
 
