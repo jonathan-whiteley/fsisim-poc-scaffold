@@ -16,3 +16,4 @@ generated_manuals/
 mlruns/
 mlflow.db
 mlartifacts/
+.worktrees/

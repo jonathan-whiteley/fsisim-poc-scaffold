@@ -1,0 +1,86 @@
+bundle:
+  name: fsisim_poc_scaffold
+
+sync:
+  # `.gitignore` excludes `app/frontend/dist/` (since the bundle ships only
+  # the built bundle, not source). Force-include it so the deployed App can
+  # serve the SPA.
+  include:
+    - app/frontend/dist/**
+
+variables:
+  catalog:
+    default: jdub_demo
+  schema:
+    default: fsisim_issue_ai_gold
+  lakebase_instance_name:
+    default: flightsafety-lakebase
+  lakebase_database_name:
+    default: databricks_postgres
+  eval_personas_file:
+    default: agent_server.personas
+  agent_app_name:
+    default: fsisim-scaffold-dab
+
+resources:
+  experiments:
+    fsisim_experiment:
+      name: /Users/${workspace.current_user.userName}/fsisim-experiment
+
+  apps:
+    fsisim_scaffold:
+      name: ${var.agent_app_name}
+      description: FSISIM Issue Resolution Agent (synthetic data; Agents as Apps)
+      source_code_path: ./
+      config:
+        command: ["uv", "run", "start-app"]
+        env:
+          - name: MLFLOW_TRACKING_URI
+            value: "databricks"
+          - name: MLFLOW_REGISTRY_URI
+            value: "databricks-uc"
+          - name: MLFLOW_EXPERIMENT_ID
+            value_from: "experiment"
+          - name: LAKEBASE_INSTANCE_NAME
+            value: ${var.lakebase_instance_name}
+          - name: LAKEBASE_DATABASE_NAME
+            value: ${var.lakebase_database_name}
+          - name: LAKEBASE_AGENT_MEMORY_SCHEMA
+            value: "agent_server"
+          - name: FSISIM_CATALOG
+            value: ${var.catalog}
+          - name: FSISIM_SCHEMA
+            value: ${var.schema}
+      resources:
+        - name: experiment
+          experiment:
+            experiment_id: ${resources.experiments.fsisim_experiment.id}
+            permission: CAN_MANAGE
+
+  jobs:
+    fsisim_eval:
+      name: fsisim-eval
+      schedule:
+        quartz_cron_expression: "0 0 7 ? * MON"
+        timezone_id: UTC
+      tasks:
+        - task_key: evaluate
+          environment_key: default
+          spark_python_task:
+            python_file: scripts/run_eval.py
+            parameters:
+              - "--personas-file"
+              - ${var.eval_personas_file}
+      environments:
+        - environment_key: default
+          spec:
+            client: "2"
+            dependencies:
+              - mlflow>=3.0.0
+
+targets:
+  dev:
+    mode: development
+    default: true
+  prod:
+    mode: production

@@ -1,57 +1,66 @@
 import { useEffect, useRef, useState } from "react";
-import { Box, TextField, IconButton, Stack, Typography, Paper, Container } from "@mui/material";
+import { Box, Container, IconButton, Stack, TextField, useTheme } from "@mui/material";
 import SendIcon from "@mui/icons-material/Send";
-import FlightTakeoffIcon from "@mui/icons-material/FlightTakeoff";
 import MessageBubble from "./MessageBubble";
-import type { Citation } from "./CitationPill";
 import CitationSlideOver from "./CitationSlideOver";
-import { sendChat } from "../api/chat";
-import { FS_NAVY, FS_SKY, FS_SKY_LIGHT, FS_BORDER, FS_MUTED, FS_SURFACE } from "../theme";
+import EmptyHero from "./EmptyHero";
+import { getThread, sendChat, type ThreadMessage } from "../api/chat";
+import type { Citation } from "./CitationPill";
 
 interface Message {
   role: "user" | "assistant";
   text: string;
   citations?: Citation[];
+  assistantMessageId?: string;
+  initialRating?: "up" | "down" | null;
+  loading?: boolean;
 }
 
 interface Props {
   examples: string[];
+  threadId: string | null;
+  onThreadChange: (threadId: string) => void;
 }
 
-import type { ChatResponse } from "../api/chat";
-
-function buildCitations(resp: ChatResponse): Citation[] {
-  const out: Citation[] = [];
-  for (const m of resp.manual_citations || []) {
-    out.push({
-      kind: "manual",
-      sourcePdf: m.source_pdf,
-      filename: m.filename,
-      title: m.title,
-      pageFirst: m.page_first,
-      pageLast: m.page_last,
-      preview: m.preview,
-    });
-  }
-  for (const i of resp.issue_citations || []) {
-    out.push({
-      kind: "issue",
-      issueId: i.issue_id,
-      issueType: i.issue_type,
-      simName: i.sim_name,
-      noteType: i.note_type,
-      preview: i.preview,
-    });
-  }
-  return out;
-}
-
-export default function ChatThread({ examples }: Props) {
+export default function ChatThread({ examples, threadId, onThreadChange }: Props) {
+  const theme = useTheme();
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
-  const [openCitation, setOpenCitation] = useState<Citation | null>(null);
-  const endRef = useRef<HTMLDivElement>(null);
+  const [slideOver, setSlideOver] = useState<Citation | null>(null);
+  const endRef = useRef<HTMLDivElement | null>(null);
+  // Threads minted locally by send() so we can suppress the history fetch
+  // (history doesn't carry citations; reloading would wipe what we just got).
+  const locallyCreatedThreads = useRef<Set<string>>(new Set());
+
+  // Load history when the parent switches threads.
+  useEffect(() => {
+    if (!threadId) {
+      setMessages([]);
+      return;
+    }
+    if (locallyCreatedThreads.current.has(threadId)) {
+      // We just created this thread via send(); state already has the full
+      // response (with citations). Don't refetch.
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      const { messages: hist } = await getThread(threadId);
+      if (cancelled) return;
+      const mapped: Message[] = hist
+        .filter((m: ThreadMessage) => m.role !== "system")
+        .map((m: ThreadMessage) => ({
+          role: m.role as "user" | "assistant",
+          text: m.content,
+          assistantMessageId: m.role === "assistant" ? m.id : undefined,
+        }));
+      setMessages(mapped);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [threadId]);
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -60,99 +69,87 @@ export default function ChatThread({ examples }: Props) {
   async function send(textOverride?: string) {
     const content = (textOverride ?? input).trim();
     if (!content || busy) return;
-    const userMsg: Message = { role: "user", text: content };
-    const next = [...messages, userMsg];
+    const next: Message[] = [
+      ...messages,
+      { role: "user", text: content },
+      { role: "assistant", text: "", loading: true },
+    ];
     setMessages(next);
     setInput("");
     setBusy(true);
 
-    const assistantMsg: Message = { role: "assistant", text: "", citations: [] };
-    setMessages(m => [...m, assistantMsg]);
+    const resp = await sendChat(content, threadId ?? undefined);
 
-    try {
-      const result = await sendChat(next.map(m => ({ role: m.role, content: m.text })));
-      setMessages(m => {
-        const copy = [...m];
-        copy[copy.length - 1] = {
-          ...copy[copy.length - 1],
-          text: result.text || "(no response)",
-          citations: buildCitations(result),
-        };
-        return copy;
-      });
-    } finally {
-      setBusy(false);
+    if (!threadId && resp.thread_id) {
+      locallyCreatedThreads.current.add(resp.thread_id);
+      onThreadChange(resp.thread_id);
     }
+
+    const citations: Citation[] = [
+      ...resp.manual_citations.map((m) => ({
+        kind: "manual" as const,
+        sourcePdf: m.source_pdf,
+        filename: m.filename,
+        title: m.title,
+        pageFirst: m.page_first,
+        pageLast: m.page_last,
+        preview: m.preview,
+      })),
+      ...resp.issue_citations.map((i) => ({
+        kind: "issue" as const,
+        issueId: i.issue_id,
+        issueType: i.issue_type,
+        simName: i.sim_name,
+        noteType: i.note_type,
+        preview: i.preview,
+      })),
+    ];
+
+    setMessages((m) => {
+      const copy = [...m];
+      copy[copy.length - 1] = {
+        role: "assistant",
+        text: resp.text || "(no response)",
+        citations,
+        assistantMessageId: resp.assistant_message_id,
+        loading: false,
+      };
+      return copy;
+    });
+    setBusy(false);
   }
 
   const hasMessages = messages.length > 0;
 
   return (
-    <>
-      <Box
-        sx={{
-          flex: 1,
-          overflowY: "auto",
-          bgcolor: FS_SURFACE,
-          display: "flex",
-          flexDirection: "column",
-        }}
-      >
+    <Box sx={{ display: "flex", flex: 1, overflow: "hidden", position: "relative" }}>
+      <Box sx={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
         <Container maxWidth="md" sx={{ flex: 1, display: "flex", flexDirection: "column", py: hasMessages ? 3 : 0 }}>
           {!hasMessages && <EmptyHero examples={examples} onPickExample={(q) => send(q)} />}
           {hasMessages && (
             <Stack sx={{ flex: 1, width: "100%" }}>
-              {messages.map((m, i) => {
-                const isLast = i === messages.length - 1;
-                return (
-                  <MessageBubble
-                    key={i}
-                    role={m.role}
-                    text={m.text}
-                    citations={m.citations}
-                    streaming={busy && isLast && m.role === "assistant"}
-                    onCitationClick={setOpenCitation}
-                  />
-                );
-              })}
+              {messages.map((m, i) => (
+                <MessageBubble
+                  key={i}
+                  role={m.role}
+                  text={m.text}
+                  citations={m.citations}
+                  assistantMessageId={m.assistantMessageId}
+                  initialRating={m.initialRating ?? null}
+                  loading={m.loading}
+                  onCitationClick={setSlideOver}
+                />
+              ))}
               <div ref={endRef} />
             </Stack>
           )}
         </Container>
-      </Box>
-
-      <Box
-        sx={{
-          borderTop: `1px solid ${FS_BORDER}`,
-          bgcolor: "#FFFFFF",
-          px: 2,
-          py: 1.5,
-        }}
-      >
-        <Container maxWidth="md" sx={{ px: { xs: 0, sm: 2 } }}>
-          <Paper
-            elevation={0}
-            sx={{
-              display: "flex",
-              alignItems: "center",
-              gap: 1,
-              p: 0.5,
-              pl: 1.5,
-              border: `1px solid ${FS_BORDER}`,
-              borderRadius: 3,
-              transition: "border-color 0.15s, box-shadow 0.15s",
-              "&:focus-within": {
-                borderColor: FS_SKY,
-                boxShadow: `0 0 0 3px ${FS_SKY_LIGHT}`,
-              },
-            }}
-          >
+        <Box sx={{ borderTop: `1px solid ${theme.palette.divider}`, p: 1.5 }}>
+          <Container maxWidth="md" sx={{ display: "flex", gap: 1 }}>
             <TextField
               fullWidth
-              multiline
-              maxRows={5}
-              variant="standard"
-              placeholder="Describe a simulator issue, ask about jargon, or paste a fault code..."
+              size="small"
+              placeholder="Ask about an issue, a fault code, or a manual…"
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => {
@@ -162,107 +159,23 @@ export default function ChatThread({ examples }: Props) {
                 }
               }}
               disabled={busy}
-              slotProps={{ input: { disableUnderline: true, sx: { fontSize: 14.5, py: 0.5 } } }}
             />
             <IconButton
               onClick={() => send()}
               disabled={busy || !input.trim()}
-              sx={{
-                bgcolor: input.trim() && !busy ? FS_NAVY : "#E5E7EB",
-                color: "#FFFFFF",
-                width: 40,
-                height: 40,
-                transition: "all 0.15s",
-                "&:hover": { bgcolor: input.trim() && !busy ? "#000010" : "#E5E7EB" },
-                "&.Mui-disabled": { color: "#FFFFFF", opacity: 0.5 },
-              }}
+              sx={{ color: theme.palette.text.primary }}
+              aria-label="send"
             >
-              <SendIcon sx={{ fontSize: 18 }} />
+              <SendIcon />
             </IconButton>
-          </Paper>
-          <Typography
-            variant="caption"
-            sx={{ display: "block", textAlign: "center", color: FS_MUTED, mt: 1, fontSize: 11 }}
-          >
-            Press <strong>Enter</strong> to send · <strong>Shift+Enter</strong> for newline. Responses may contain
-            errors; verify against source citations.
-          </Typography>
-        </Container>
-      </Box>
-
-      <CitationSlideOver open={!!openCitation} citation={openCitation} onClose={() => setOpenCitation(null)} />
-    </>
-  );
-}
-
-function EmptyHero({ examples, onPickExample }: { examples: string[]; onPickExample: (q: string) => void }) {
-  return (
-    <Box sx={{ flex: 1, display: "flex", flexDirection: "column", justifyContent: "center", py: 6 }}>
-      <Stack sx={{ alignItems: "center", mb: 5, gap: 2.5 }}>
-        <Box
-          sx={{
-            width: 56,
-            height: 56,
-            borderRadius: "50%",
-            bgcolor: FS_NAVY,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            boxShadow: "0 4px 16px rgba(0,0,34,0.18)",
-          }}
-        >
-          <FlightTakeoffIcon sx={{ color: FS_SKY, fontSize: 28 }} />
+          </Container>
         </Box>
-        <Stack sx={{ alignItems: "center", gap: 0.5 }}>
-          <Typography variant="h1" sx={{ textAlign: "center" }}>
-            FSISIM Issue Resolution
-          </Typography>
-          <Typography sx={{ color: FS_MUTED, textAlign: "center", maxWidth: 520 }}>
-            Search past G001 simulator issues, resolve acronyms against technical manuals, and surface
-            prior resolutions in seconds.
-          </Typography>
-        </Stack>
-      </Stack>
-
-      <Stack spacing={1.5} sx={{ width: "100%", maxWidth: 640, mx: "auto" }}>
-        <Typography variant="overline" sx={{ textAlign: "left", mb: 0.5 }}>
-          Try one of these
-        </Typography>
-        {examples.map((q, i) => (
-          <Paper
-            key={i}
-            onClick={() => onPickExample(q)}
-            elevation={0}
-            sx={{
-              p: 1.75,
-              border: `1px solid ${FS_BORDER}`,
-              borderRadius: 2,
-              cursor: "pointer",
-              display: "flex",
-              alignItems: "center",
-              gap: 1.5,
-              transition: "all 0.15s",
-              "&:hover": {
-                borderColor: FS_NAVY,
-                bgcolor: "#FFFFFF",
-                boxShadow: "0 4px 12px rgba(0,0,34,0.06)",
-                transform: "translateY(-1px)",
-              },
-            }}
-          >
-            <Box
-              sx={{
-                width: 6,
-                height: 6,
-                borderRadius: "50%",
-                bgcolor: FS_SKY,
-                flexShrink: 0,
-              }}
-            />
-            <Typography sx={{ fontSize: 14, color: FS_NAVY, fontWeight: 500 }}>{q}</Typography>
-          </Paper>
-        ))}
-      </Stack>
+      </Box>
+      <CitationSlideOver
+        open={slideOver !== null}
+        citation={slideOver}
+        onClose={() => setSlideOver(null)}
+      />
     </Box>
   );
 }
