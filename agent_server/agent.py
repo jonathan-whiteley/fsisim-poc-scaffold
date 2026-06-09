@@ -188,24 +188,40 @@ def _strip_tool_call_leak(text: str) -> str:
 
 @invoke()
 def invoke_handler(request: ResponsesAgentRequest) -> ResponsesAgentResponse:
-    """Retrieval-augmented single-turn synthesis."""
+    """Retrieval-augmented single-turn synthesis.
+
+    Wrapped in an mlflow.start_span so each turn emits a trace into the
+    bound MLflow experiment. The trace_id is returned via custom_outputs
+    so the FastAPI relay can persist it on the assistant message; that's
+    what lets /api/feedback attach an Assessment to the right trace.
+    """
     thread_id = get_session_id(request) or "default"
-    try:
-        mlflow.update_current_trace(metadata={"mlflow.trace.session": thread_id})
-    except Exception:
-        pass
-
     last_user = _last_user_text(request.input)
-    context_block = _retrieve_context(last_user) if last_user else ""
 
-    messages = [{"role": "system", "content": SYSTEM_PROMPT + context_block}]
-    messages.extend(_to_chat_dicts(request.input))
+    with mlflow.start_span(name="fsisim_chat_turn") as span:
+        span.set_attributes({
+            "thread_id": thread_id,
+            "user_email": (request.custom_inputs or {}).get("user_email", ""),
+            "input_chars": len(last_user),
+        })
+        try:
+            mlflow.update_current_trace(metadata={"mlflow.trace.session": thread_id})
+        except Exception:
+            pass
 
-    text = _strip_tool_call_leak(_call_llm(messages) or "")
+        context_block = _retrieve_context(last_user) if last_user else ""
+        messages = [{"role": "system", "content": SYSTEM_PROMPT + context_block}]
+        messages.extend(_to_chat_dicts(request.input))
+
+        text = _strip_tool_call_leak(_call_llm(messages) or "")
+        span.set_attribute("output_chars", len(text))
+
+        trace_id = getattr(span, "trace_id", None) or getattr(span, "request_id", None)
 
     return ResponsesAgentResponse(
         output=[{"type": "message", "id": "msg-final",
-                  "content": [{"type": "output_text", "text": text or "(no response)"}]}]
+                  "content": [{"type": "output_text", "text": text or "(no response)"}]}],
+        custom_outputs={"trace_id": trace_id},
     )
 
 
