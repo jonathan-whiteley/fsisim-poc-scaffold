@@ -61,8 +61,12 @@ def _get_w():
     return _W
 
 
-def _call_llm(messages: list[dict]) -> str:
-    """Call the LLM serving endpoint directly via SDK; returns the assistant text."""
+def _call_llm(messages: list[dict]) -> tuple[str, dict]:
+    """Call the LLM serving endpoint directly via SDK.
+
+    Returns (text, usage_dict). usage_dict has prompt_tokens / completion_tokens /
+    total_tokens when the endpoint reports them; otherwise empty.
+    """
     from databricks.sdk.service.serving import ChatMessage, ChatMessageRole
 
     cfg = Config()
@@ -79,11 +83,19 @@ def _call_llm(messages: list[dict]) -> str:
     ]
 
     resp = w.serving_endpoints.query(name=cfg.llm_endpoint, messages=chat_messages)
+    text = ""
     if resp.choices and len(resp.choices) > 0:
         msg = resp.choices[0].message
-        content = msg.content if hasattr(msg, "content") else None
-        return content or ""
-    return ""
+        text = (msg.content if hasattr(msg, "content") else None) or ""
+
+    usage: dict = {}
+    u = getattr(resp, "usage", None)
+    if u is not None:
+        for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
+            val = getattr(u, key, None)
+            if val is not None:
+                usage[key] = int(val)
+    return text, usage
 
 
 def _retrieve_context(query: str) -> str:
@@ -213,7 +225,33 @@ def invoke_handler(request: ResponsesAgentRequest) -> ResponsesAgentResponse:
         messages = [{"role": "system", "content": SYSTEM_PROMPT + context_block}]
         messages.extend(_to_chat_dicts(request.input))
 
-        text = _strip_tool_call_leak(_call_llm(messages) or "")
+        # Record the inputs MLflow shows in the Request column.
+        span.set_inputs({
+            "thread_id": thread_id,
+            "last_user_message": last_user,
+            "retrieved_context_chars": len(context_block),
+            "history_turns": len(messages) - 1,
+        })
+
+        raw_text, usage = _call_llm(messages)
+        text = _strip_tool_call_leak(raw_text or "")
+
+        # Record the outputs MLflow shows in the Response column.
+        span.set_outputs({"assistant_text": text})
+
+        # Token usage drives the Tokens column. MLflow looks for these specific
+        # attribute names (OpenTelemetry GenAI semantic conventions).
+        if usage:
+            if "prompt_tokens" in usage:
+                span.set_attribute("llm.token_count.prompt", usage["prompt_tokens"])
+                span.set_attribute("mlflow.usage.prompt_tokens", usage["prompt_tokens"])
+            if "completion_tokens" in usage:
+                span.set_attribute("llm.token_count.completion", usage["completion_tokens"])
+                span.set_attribute("mlflow.usage.completion_tokens", usage["completion_tokens"])
+            if "total_tokens" in usage:
+                span.set_attribute("llm.token_count.total", usage["total_tokens"])
+                span.set_attribute("mlflow.usage.total_tokens", usage["total_tokens"])
+
         span.set_attribute("output_chars", len(text))
 
         trace_id = getattr(span, "trace_id", None) or getattr(span, "request_id", None)
@@ -247,7 +285,7 @@ async def stream_handler(
     messages = [{"role": "system", "content": SYSTEM_PROMPT + context_block}]
     messages.extend(_to_chat_dicts(request.input))
 
-    text = _call_llm(messages)
+    text, _ = _call_llm(messages)
 
     yield ResponsesAgentStreamEvent(
         type="response.output_item.done",

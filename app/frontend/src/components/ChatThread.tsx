@@ -13,6 +13,7 @@ interface Message {
   citations?: Citation[];
   assistantMessageId?: string;
   initialRating?: "up" | "down" | null;
+  loading?: boolean;
 }
 
 interface Props {
@@ -71,7 +72,7 @@ export default function ChatThread({ examples, threadId, onThreadChange }: Props
     const next: Message[] = [
       ...messages,
       { role: "user", text: content },
-      { role: "assistant", text: "…" },
+      { role: "assistant", text: "", loading: true },
     ];
     setMessages(next);
     setInput("");
@@ -111,6 +112,7 @@ export default function ChatThread({ examples, threadId, onThreadChange }: Props
         text: resp.text || "(no response)",
         citations,
         assistantMessageId: resp.assistant_message_id,
+        loading: false,
       };
       return copy;
     });
@@ -134,6 +136,7 @@ export default function ChatThread({ examples, threadId, onThreadChange }: Props
                   citations={m.citations}
                   assistantMessageId={m.assistantMessageId}
                   initialRating={m.initialRating ?? null}
+                  loading={m.loading}
                   onCitationClick={setSlideOver}
                 />
               ))}

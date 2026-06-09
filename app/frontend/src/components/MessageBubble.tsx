@@ -17,7 +17,40 @@ interface Props {
   citations?: Citation[];
   assistantMessageId?: string;
   initialRating?: "up" | "down" | null;
+  loading?: boolean;
   onCitationClick?: (c: Citation) => void;
+}
+
+function TypingDots({ color }: { color: string }) {
+  return (
+    <Box
+      component="span"
+      sx={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 0.5,
+        py: 0.25,
+        "@keyframes fsisimTypingBounce": {
+          "0%, 80%, 100%": { transform: "translateY(0)", opacity: 0.35 },
+          "40%": { transform: "translateY(-4px)", opacity: 1 },
+        },
+        "& span": {
+          width: 6,
+          height: 6,
+          borderRadius: "50%",
+          bgcolor: color,
+          display: "inline-block",
+          animation: "fsisimTypingBounce 1.2s infinite ease-in-out",
+        },
+        "& span:nth-of-type(1)": { animationDelay: "0s" },
+        "& span:nth-of-type(2)": { animationDelay: "0.15s" },
+        "& span:nth-of-type(3)": { animationDelay: "0.3s" },
+      }}
+      aria-label="Assistant is thinking"
+    >
+      <span /><span /><span />
+    </Box>
+  );
 }
 
 export default function MessageBubble({
@@ -26,6 +59,7 @@ export default function MessageBubble({
   citations,
   assistantMessageId,
   initialRating = null,
+  loading = false,
   onCitationClick,
 }: Props) {
   const theme = useTheme();
@@ -129,7 +163,11 @@ export default function MessageBubble({
           "& th": { bgcolor: codeBg, fontWeight: 600 },
         }}
       >
-        <ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>
+        {loading ? (
+          <TypingDots color={theme.palette.text.secondary} />
+        ) : (
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>
+        )}
       </Box>
       {citations && citations.length > 0 && (
         <Box sx={{ mt: 0.75, display: "flex", flexWrap: "wrap" }}>
