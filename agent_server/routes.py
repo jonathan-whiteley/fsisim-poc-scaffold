@@ -406,45 +406,65 @@ def _persist_turn(
     return message_id
 
 
+def _extract_text(body: dict) -> str:
+    text = ""
+    for item in body.get("output", []) or []:
+        for part in (item.get("content") or []):
+            if isinstance(part, dict) and part.get("type") in ("output_text", "text"):
+                if part.get("text"):
+                    text += part["text"]
+    return text
+
+
 @router.post("/api/chat")
 async def chat(req: ChatRequest, request: Request):
+    """Route chat through AgentServer's /invocations endpoint.
+
+    AgentServer owns the tracing + Lakebase persistence pipeline; we keep
+    our own _persist_turn for the user message (in case /invocations fails)
+    and read trace_id from the response headers / custom_outputs so
+    /api/feedback can attach an MLflow Assessment.
+    """
     email = get_user_email(request)
     if not email:
         raise HTTPException(status_code=401, detail="Authentication required")
 
     thread_id = req.thread_id or str(uuid.uuid4())
 
-    # Persist the user turn before invoking the agent so the thread shows up
-    # in the sidebar even if the agent call fails.
+    # Persist the user turn first so the thread shows up in the sidebar even
+    # if /invocations fails. AgentServer will also persist if configured; the
+    # uuid PK prevents duplicates.
     _persist_turn(thread_id, email, "user", req.content)
 
-    agent_req = ResponsesAgentRequest(
-        input=[{"role": "user", "content": req.content}],
-        custom_inputs={"thread_id": thread_id, "user_email": email},
+    payload = {
+        "input": [{"role": "user", "content": req.content}],
+        "custom_inputs": {"thread_id": thread_id, "user_email": email},
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            r = await client.post("http://localhost:8000/invocations", json=payload)
+            r.raise_for_status()
+        body = r.json()
+    except Exception as e:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Agent /invocations failed: {type(e).__name__}: {e}",
+        )
+
+    text = _extract_text(body) or "(no response)"
+
+    # Prefer trace_id from response headers (AgentServer convention); fall
+    # back to custom_outputs.trace_id if present.
+    mlflow_trace_id = (
+        r.headers.get("mlflow-trace-id")
+        or r.headers.get("x-mlflow-trace-id")
+        or (body.get("custom_outputs") or {}).get("trace_id")
     )
 
-    response = _call_invoke(agent_req)
-
-    text = ""
-    for item in response.output:
-        if isinstance(item, dict):
-            content = item.get("content", [])
-        else:
-            content = getattr(item, "content", [])
-        for part in content:
-            ptype = part.get("type") if isinstance(part, dict) else getattr(part, "type", None)
-            ptext = part.get("text") if isinstance(part, dict) else getattr(part, "text", None)
-            if ptype in ("output_text", "text") and ptext:
-                text += ptext
-
-    # The agent returns the MLflow trace_id via custom_outputs; capture it so
-    # /api/feedback can attach an Assessment to the right trace.
-    custom_outputs = getattr(response, "custom_outputs", None) or {}
-    mlflow_trace_id = custom_outputs.get("trace_id") if isinstance(custom_outputs, dict) else None
-
-    # Persist the assistant turn with a fresh uuid so feedback can attach to it.
+    # Persist the assistant turn so feedback has a stable message_id key.
     assistant_message_id = _persist_turn(
-        thread_id, email, "assistant", text or "(no response)",
+        thread_id, email, "assistant", text,
         mlflow_trace_id=mlflow_trace_id,
     )
 
@@ -452,8 +472,9 @@ async def chat(req: ChatRequest, request: Request):
 
     return {
         "thread_id": thread_id,
-        "text": text or "(no response)",
+        "text": text,
         "manual_citations": citations["manual_citations"],
         "issue_citations": citations["issue_citations"],
         "assistant_message_id": assistant_message_id,
+        "mlflow_trace_id": mlflow_trace_id,
     }
