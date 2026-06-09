@@ -1,6 +1,6 @@
-import { Box, Paper, Stack, Typography } from "@mui/material";
+import { Box, Paper, Stack, Typography, useTheme } from "@mui/material";
 import FlightTakeoffIcon from "@mui/icons-material/FlightTakeoff";
-import { FS_BORDER, FS_MUTED, FS_NAVY, FS_SKY } from "../theme";
+import { FS_NAVY, FS_SKY } from "../theme";
 
 interface Props {
   examples: string[];
@@ -8,6 +8,9 @@ interface Props {
 }
 
 export default function EmptyHero({ examples, onPickExample }: Props) {
+  const theme = useTheme();
+  const isDark = theme.palette.mode === "dark";
+
   return (
     <Box sx={{ flex: 1, display: "flex", flexDirection: "column", justifyContent: "center", py: 6 }}>
       <Stack sx={{ alignItems: "center", mb: 5, gap: 2.5 }}>
@@ -20,16 +23,17 @@ export default function EmptyHero({ examples, onPickExample }: Props) {
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
-            boxShadow: "0 4px 16px rgba(0,0,34,0.18)",
+            boxShadow: isDark ? "0 4px 16px rgba(0,0,0,0.5)" : "0 4px 16px rgba(0,0,34,0.18)",
+            border: isDark ? `1px solid ${theme.palette.divider}` : "none",
           }}
         >
           <FlightTakeoffIcon sx={{ color: FS_SKY, fontSize: 28 }} />
         </Box>
         <Stack sx={{ alignItems: "center", gap: 0.5 }}>
-          <Typography variant="h1" sx={{ textAlign: "center" }}>
+          <Typography variant="h1" sx={{ textAlign: "center", color: theme.palette.text.primary }}>
             FSISIM Issue Resolution
           </Typography>
-          <Typography sx={{ color: FS_MUTED, textAlign: "center", maxWidth: 520 }}>
+          <Typography sx={{ color: theme.palette.text.secondary, textAlign: "center", maxWidth: 520 }}>
             Search past G001 simulator issues, resolve acronyms against technical manuals, and surface
             prior resolutions in seconds.
           </Typography>
@@ -37,7 +41,10 @@ export default function EmptyHero({ examples, onPickExample }: Props) {
       </Stack>
 
       <Stack spacing={1.5} sx={{ width: "100%", maxWidth: 640, mx: "auto" }}>
-        <Typography variant="overline" sx={{ textAlign: "left", mb: 0.5 }}>
+        <Typography
+          variant="overline"
+          sx={{ textAlign: "left", mb: 0.5, color: theme.palette.text.secondary }}
+        >
           Try one of these
         </Typography>
         {examples.map((q, i) => (
@@ -47,7 +54,8 @@ export default function EmptyHero({ examples, onPickExample }: Props) {
             elevation={0}
             sx={{
               p: 1.75,
-              border: `1px solid ${FS_BORDER}`,
+              bgcolor: theme.palette.background.paper,
+              border: `1px solid ${theme.palette.divider}`,
               borderRadius: 2,
               cursor: "pointer",
               display: "flex",
@@ -55,9 +63,11 @@ export default function EmptyHero({ examples, onPickExample }: Props) {
               gap: 1.5,
               transition: "all 0.15s",
               "&:hover": {
-                borderColor: FS_NAVY,
-                bgcolor: "#FFFFFF",
-                boxShadow: "0 4px 12px rgba(0,0,34,0.06)",
+                borderColor: isDark ? FS_SKY : FS_NAVY,
+                bgcolor: isDark ? "rgba(42,111,181,0.10)" : "#FFFFFF",
+                boxShadow: isDark
+                  ? "0 4px 12px rgba(0,0,0,0.4)"
+                  : "0 4px 12px rgba(0,0,34,0.06)",
                 transform: "translateY(-1px)",
               },
             }}
@@ -71,7 +81,15 @@ export default function EmptyHero({ examples, onPickExample }: Props) {
                 flexShrink: 0,
               }}
             />
-            <Typography sx={{ fontSize: 14, color: FS_NAVY, fontWeight: 500 }}>{q}</Typography>
+            <Typography
+              sx={{
+                fontSize: 14,
+                color: theme.palette.text.primary,
+                fontWeight: 500,
+              }}
+            >
+              {q}
+            </Typography>
           </Paper>
         ))}
       </Stack>

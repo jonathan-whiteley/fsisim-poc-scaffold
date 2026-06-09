@@ -1,12 +1,11 @@
 import { useEffect, useRef, useState } from "react";
-import { Box, Container, IconButton, Stack, TextField } from "@mui/material";
+import { Box, Container, IconButton, Stack, TextField, useTheme } from "@mui/material";
 import SendIcon from "@mui/icons-material/Send";
 import MessageBubble from "./MessageBubble";
 import CitationSlideOver from "./CitationSlideOver";
 import EmptyHero from "./EmptyHero";
 import { getThread, sendChat, type ThreadMessage } from "../api/chat";
 import type { Citation } from "./CitationPill";
-import { FS_NAVY, FS_BORDER } from "../theme";
 
 interface Message {
   role: "user" | "assistant";
@@ -23,6 +22,7 @@ interface Props {
 }
 
 export default function ChatThread({ examples, threadId, onThreadChange }: Props) {
+  const theme = useTheme();
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
@@ -141,7 +141,7 @@ export default function ChatThread({ examples, threadId, onThreadChange }: Props
             </Stack>
           )}
         </Container>
-        <Box sx={{ borderTop: `1px solid ${FS_BORDER}`, p: 1.5 }}>
+        <Box sx={{ borderTop: `1px solid ${theme.palette.divider}`, p: 1.5 }}>
           <Container maxWidth="md" sx={{ display: "flex", gap: 1 }}>
             <TextField
               fullWidth
@@ -160,7 +160,7 @@ export default function ChatThread({ examples, threadId, onThreadChange }: Props
             <IconButton
               onClick={() => send()}
               disabled={busy || !input.trim()}
-              sx={{ color: FS_NAVY }}
+              sx={{ color: theme.palette.text.primary }}
               aria-label="send"
             >
               <SendIcon />

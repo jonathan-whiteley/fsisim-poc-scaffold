@@ -1,7 +1,7 @@
-import { Chip } from "@mui/material";
+import { Chip, useTheme } from "@mui/material";
 import DescriptionOutlinedIcon from "@mui/icons-material/DescriptionOutlined";
 import BugReportOutlinedIcon from "@mui/icons-material/BugReportOutlined";
-import { FS_NAVY, FS_SKY, FS_SKY_LIGHT, FS_BORDER, FS_MUTED } from "../theme";
+import { FS_NAVY, FS_SKY, FS_SKY_LIGHT, FS_SKY_LIGHT_DARK } from "../theme";
 
 export type Citation =
   | { kind: "issue"; issueId: number; issueType: string; simName: string; noteType: string; preview: string }
@@ -19,10 +19,21 @@ function pageLabel(first: number, last: number): string {
 }
 
 export default function CitationPill({ c, onClick }: Props) {
+  const theme = useTheme();
+  const isDark = theme.palette.mode === "dark";
   const isIssue = c.kind === "issue";
   const label = isIssue
     ? `Issue #${c.issueId} · ${c.simName}`
     : `${c.title} · ${pageLabel(c.pageFirst, c.pageLast)}`;
+
+  const issueBg = isDark ? FS_SKY_LIGHT_DARK : FS_SKY_LIGHT;
+  const manualBg = theme.palette.background.paper;
+  const textColor = theme.palette.text.primary;
+  const mutedColor = theme.palette.text.secondary;
+  const iconColor = isIssue ? FS_SKY : textColor;
+  const hoverBg = isIssue
+    ? (isDark ? "#264166" : "#D6E4F6")
+    : (isDark ? "rgba(255,255,255,0.06)" : "#F4F5F8");
 
   return (
     <Chip
@@ -31,9 +42,9 @@ export default function CitationPill({ c, onClick }: Props) {
       onClick={onClick}
       size="small"
       sx={{
-        bgcolor: isIssue ? FS_SKY_LIGHT : "#FFFFFF",
-        color: isIssue ? FS_NAVY : FS_MUTED,
-        border: `1px solid ${isIssue ? FS_SKY : FS_BORDER}`,
+        bgcolor: isIssue ? issueBg : manualBg,
+        color: isIssue ? textColor : mutedColor,
+        border: `1px solid ${isIssue ? FS_SKY : theme.palette.divider}`,
         fontWeight: 600,
         fontSize: 11.5,
         height: 24,
@@ -41,7 +52,7 @@ export default function CitationPill({ c, onClick }: Props) {
         mb: 0.5,
         cursor: "pointer",
         "& .MuiChip-icon": {
-          color: isIssue ? FS_SKY : FS_NAVY,
+          color: iconColor,
           fontSize: 14,
           ml: 0.5,
           mr: -0.25,
@@ -49,9 +60,9 @@ export default function CitationPill({ c, onClick }: Props) {
         "& .MuiChip-label": { px: 0.875, letterSpacing: "0.005em" },
         transition: "all 0.12s",
         "&:hover": {
-          bgcolor: isIssue ? "#D6E4F6" : "#F4F5F8",
-          borderColor: FS_NAVY,
-          color: FS_NAVY,
+          bgcolor: hoverBg,
+          borderColor: isDark ? FS_SKY : FS_NAVY,
+          color: textColor,
         },
       }}
     />
